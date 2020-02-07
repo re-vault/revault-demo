@@ -71,6 +71,13 @@ start_regtest () {
 	generate_regtest &
 }
 
+soft_stop_regtest () {
+	for i in $(seq $n_nodes);do
+		bitcoin-cli -regtest -rpcpassword=test -rpcuser=test -rpcport=$((9000 + $i)) stop \
+		> /dev/null && echo "bitcoind #$i stopped"
+	done
+}
+
 # Stop the regression testing network and __deletes the data directories__
 stop_regtest () {
 	PREFIX_DIR="$PWD/regtest"
@@ -80,10 +87,6 @@ stop_regtest () {
 	fi
 
 	for i in $(seq $n_nodes);do
-		lightning-cli --lightning-dir "$PREFIX_DIR/lndir$i" --network regtest stop > /dev/null
-		rm -rf "$PREFIX_DIR/lndir$i"
-		echo "lightningd #$i stopped"
-		sleep 0.1
 		bitcoin-cli -regtest -rpcpassword=test -rpcuser=test -rpcport=$((9000 + $i)) stop > /dev/null
 		rm -rf "$PREFIX_DIR/bcdir$i"
 		echo "bitcoind #$i stopped"
