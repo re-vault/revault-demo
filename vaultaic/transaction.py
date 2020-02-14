@@ -1,11 +1,17 @@
 import hashlib
 
-from bitcoin.core import CTxOut
+from bitcoin.core import (
+    CTxOut, CTxIn, CTxInWitness, CTxWitness, CMutableTransaction, CTransaction,
+    COutPoint, b2x
+)
 from bitcoin.core.script import (
     CScript, OP_CHECKSIG, OP_CHECKSIGVERIFY, OP_SWAP, OP_ADD, OP_DUP, OP_EQUAL,
     OP_EQUALVERIFY, OP_NOP3, OP_IF, OP_ELSE, OP_ENDIF, OP_0,
-    OP_2, OP_3, OP_4, OP_6
+    OP_2, OP_3, OP_4, OP_6, SignatureHash, SIGHASH_ALL, SIGVERSION_WITNESS_V0,
+    CScriptWitness
 )
+from bitcoin.wallet import CKey
+
 
 # FIXME: Make Peter Todd accept Kanzure's PRs :(
 OP_CHECKSEQUENCEVERIFY = OP_NOP3
@@ -61,3 +67,41 @@ def emergency_txout(pubkeys, value):
     """
     # We made it a different transaction just for terminology
     return vault_txout(*pubkeys, value)
+
+
+def unvault_tx(vault_txid, vault_vout, privkeys, pub_trader1,
+               pub_trader2, pub1, pub2, pub_server, value):
+    """The transaction which spends from a vault txo.
+
+    :param vault_txid: The id of the transaction funding the vault.
+    :param vault_vout: The index of the vault output in this transaction.
+    :param privkeys: A list of the private keys of the four stakeholders to
+                     sign the transaction.
+    :param pub_trader1: The pubkey of the first trader, as bytes.
+    :param pub_trader2: The pubkey of the second trader, as bytes.
+    :param pub1: The pubkey of the first stakeholder, as bytes.
+    :param pub2: The pubkey of the second stakeholder, as bytes.
+    :param pub_server: The pubkey of the cosigning server, as bytes.
+    :param value: The output value in satoshis.
+
+    :return: The signed unvaulting transaction, a CTransaction.
+    """
+    privkeys = [CKey(k) for k in privkeys]
+    # A dummy txin to create the transaction hash to sign
+    tmp_txin = CTxIn(COutPoint(vault_txid, vault_vout))
+    # We spend to the unvaulting script
+    target_txout = unvault_txout(pub_trader1, pub_trader2, pub1, pub2,
+                                 pub_server, value)
+    tx = CMutableTransaction([tmp_txin], [target_txout])
+    tx_hash = SignatureHash(target_txout.scriptPubKey, tx, vault_vout,
+                            SIGHASH_ALL, amount=value,
+                            sigversion=SIGVERSION_WITNESS_V0)
+    # A signature per pubkey
+    sigs = [key.sign(tx_hash) + bytes([SIGHASH_ALL]) for key in privkeys]
+    # Spending a P2WSH, so the witness is <unlocking_script> <actual_script>.
+    # Here, unlocking_script is the four signatures.
+    witness_script = [*sigs, CScript([OP_4, *[k.pub for k in privkeys], OP_4])]
+    witness = CTxInWitness(CScriptWitness(witness_script))
+    tx.wit = CTxWitness([witness])
+    # Make it immutable
+    return CTransaction.from_tx(tx)
