@@ -11,18 +11,15 @@ from bitcoin.core.script import (
 OP_CHECKSEQUENCEVERIFY = OP_NOP3
 
 
-def vault_txout(pub1, pub2, pub3, pub4, value):
+def vault_txout(pubkeys, value):
     """The output of the funding transaction.
 
-    :param pub1: The pubkey of the first stakeholder, as bytes.
-    :param pub2: The pubkey of the second stakeholder, as bytes.
-    :param pub3: The pubkey of the third stakeholder, as bytes.
-    :param pub4: The pubkey of the fourth stakeholder, as bytes.
+    :param pubkeys: A list containing the pubkey of each stakeholder, as bytes.
     :param value: The output value in satoshis.
 
     :return: A CTxOut paying to a 4of4.
     """
-    script = CScript([OP_4, pub1, pub2, pub3, pub4, OP_4])
+    script = CScript([OP_4, *pubkeys, OP_4])
     p2wsh = CScript([OP_0, hashlib.sha256(script).digest()])
     return CTxOut(value, p2wsh)
 
@@ -53,16 +50,14 @@ def unvault_txout(pub_trader1, pub_trader2, pub1, pub2, pub_server, value):
     return CTxOut(value, p2wsh)
 
 
-def emergency_txout(pub1, pub2, pub3, pub4, value):
+def emergency_txout(pubkeys, value):
     """The "deep vault".
 
-    :param pub1: The offline pubkey of the first stakeholder, as bytes.
-    :param pub2: The offline pubkey of the second stakeholder, as bytes.
-    :param pub3: The offline pubkey of the third stakeholder, as bytes.
-    :param pub4: The offline pubkey of the fourth stakeholder, as bytes.
+    :param pubkeys: A list containing the offline pubkey of each of the
+                    stakeholders, as bytes.
     :param value: The output value in satoshis.
 
     :return: A CTxOut paying to a 4of4 of all stakeholers' offline pubkeys.
     """
     # We made it a different transaction just for terminology
-    return vault_txout(pub1, pub2, pub3, pub4, value)
+    return vault_txout(*pubkeys, value)
