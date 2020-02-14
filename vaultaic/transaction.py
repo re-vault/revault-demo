@@ -66,7 +66,36 @@ def emergency_txout(pubkeys, value):
     :return: A CTxOut paying to a 4of4 of all stakeholers' offline pubkeys.
     """
     # We made it a different transaction just for terminology
-    return vault_txout(*pubkeys, value)
+    return vault_txout(pubkeys, value)
+
+
+def spend_vault_txout(vault_txid, vault_vout, privkeys, txout):
+    """Creates a transaction spending a vault txout.
+
+    Note that this transaction only ever has one input and one output.
+
+    :param vault_txid: The id of the transaction funding the vault.
+    :param vault_vout: The index of the vault output in this transaction.
+    :param privkeys: A list of the private keys of the four stakeholders to
+                     sign the transaction.
+    :param txout: The CTxOut to pay to.
+    """
+    privkeys = [CKey(k) for k in privkeys]
+    # A dummy txin to create the transaction hash to sign
+    tmp_txin = CTxIn(COutPoint(vault_txid, vault_vout))
+    tx = CMutableTransaction([tmp_txin], [txout])
+    tx_hash = SignatureHash(txout.scriptPubKey, tx, vault_vout,
+                            SIGHASH_ALL, amount=txout.nValue,
+                            sigversion=SIGVERSION_WITNESS_V0)
+    # A signature per pubkey
+    sigs = [key.sign(tx_hash) + bytes([SIGHASH_ALL]) for key in privkeys]
+    # Spending a P2WSH, so the witness is <unlocking_script> <actual_script>.
+    # Here, unlocking_script is the four signatures.
+    witness_script = [*sigs, CScript([OP_4, *[k.pub for k in privkeys], OP_4])]
+    witness = CTxInWitness(CScriptWitness(witness_script))
+    tx.wit = CTxWitness([witness])
+    # Make it immutable
+    return CTransaction.from_tx(tx)
 
 
 def unvault_tx(vault_txid, vault_vout, privkeys, pub_trader1,
@@ -86,25 +115,10 @@ def unvault_tx(vault_txid, vault_vout, privkeys, pub_trader1,
 
     :return: The signed unvaulting transaction, a CTransaction.
     """
-    privkeys = [CKey(k) for k in privkeys]
-    # A dummy txin to create the transaction hash to sign
-    tmp_txin = CTxIn(COutPoint(vault_txid, vault_vout))
     # We spend to the unvaulting script
-    target_txout = unvault_txout(pub_trader1, pub_trader2, pub1, pub2,
-                                 pub_server, value)
-    tx = CMutableTransaction([tmp_txin], [target_txout])
-    tx_hash = SignatureHash(target_txout.scriptPubKey, tx, vault_vout,
-                            SIGHASH_ALL, amount=value,
-                            sigversion=SIGVERSION_WITNESS_V0)
-    # A signature per pubkey
-    sigs = [key.sign(tx_hash) + bytes([SIGHASH_ALL]) for key in privkeys]
-    # Spending a P2WSH, so the witness is <unlocking_script> <actual_script>.
-    # Here, unlocking_script is the four signatures.
-    witness_script = [*sigs, CScript([OP_4, *[k.pub for k in privkeys], OP_4])]
-    witness = CTxInWitness(CScriptWitness(witness_script))
-    tx.wit = CTxWitness([witness])
-    # Make it immutable
-    return CTransaction.from_tx(tx)
+    txout = unvault_txout(pub_trader1, pub_trader2, pub1, pub2,
+                          pub_server, value)
+    return spend_vault_txout(vault_txid, vault_vout, privkeys, txout)
 
 
 def emergency_tx(vault_txid, vault_vout, privkeys, emer_pubkeys, value):
@@ -120,21 +134,6 @@ def emergency_tx(vault_txid, vault_vout, privkeys, emer_pubkeys, value):
 
     :return: The signed unvaulting transaction, a CTransaction.
     """
-    privkeys = [CKey(k) for k in privkeys]
-    # A dummy txin to create the transaction hash to sign
-    tmp_txin = CTxIn(COutPoint(vault_txid, vault_vout))
-    # We spend to the emergency script
-    target_txout = emergency_txout(emer_pubkeys, value)
-    tx = CMutableTransaction([tmp_txin], [target_txout])
-    tx_hash = SignatureHash(target_txout.scriptPubKey, tx, vault_vout,
-                            SIGHASH_ALL, amount=value,
-                            sigversion=SIGVERSION_WITNESS_V0)
-    # A signature per pubkey
-    sigs = [key.sign(tx_hash) + bytes([SIGHASH_ALL]) for key in privkeys]
-    # Spending a P2WSH, so the witness is <unlocking_script> <actual_script>.
-    # Here, unlocking_script is the four signatures.
-    witness_script = [*sigs, CScript([OP_4, *[k.pub for k in privkeys], OP_4])]
-    witness = CTxInWitness(CScriptWitness(witness_script))
-    tx.wit = CTxWitness([witness])
-    # Make it immutable
-    return CTransaction.from_tx(tx)
+    # We pay to the emergency script
+    txout = emergency_txout(emer_pubkeys, value)
+    return spend_vault_txout(vault_txid, vault_vout, privkeys, txout)
