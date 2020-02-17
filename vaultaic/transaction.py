@@ -137,3 +137,38 @@ def emergency_vault_tx(vault_txid, vault_vout, privkeys, emer_pubkeys, value):
     # We pay to the emergency script
     txout = emergency_txout(emer_pubkeys, value)
     return spend_vault_txout(vault_txid, vault_vout, privkeys, txout)
+
+
+# FIXME: Make sure the two traders are actually two stakeholders
+def emergency_unvault_tx(unvault_txid, unvault_vout, privkeys,
+                         emer_pubkeys, value):
+    """The transaction which reverts a spend_tx to the offline 4of4.
+
+    :param unvault_txid: The id of the unvaulting transaction.
+    :param unvault_vout: The index of the unvault output in this transaction.
+    :param privkeys: A list of the private keys of the four stakeholders to
+                     sign the transaction.
+    :param emer_pubkeys: A list of the four emergency public keys of the four
+                         stakeholders.
+    :param value: The output value in satoshis.
+
+    :return: The signed unvaulting transaction, a CTransaction.
+    """
+    privkeys = [CKey(k) for k in privkeys]
+    # We pay to the emergency script
+    txout = emergency_txout(emer_pubkeys, value)
+    # A dummy txin to create the transaction hash to sign
+    tmp_txin = CTxIn(COutPoint(unvault_txid, unvault_vout))
+    tx = CMutableTransaction([tmp_txin], [txout])
+    tx_hash = SignatureHash(txout.scriptPubKey, tx, unvault_vout,
+                            SIGHASH_ALL, amount=txout.nValue,
+                            sigversion=SIGVERSION_WITNESS_V0)
+    # A signature per pubkey
+    sigs = [key.sign(tx_hash) + bytes([SIGHASH_ALL]) for key in privkeys]
+    # Spending a P2WSH, so the witness is <unlocking_script> <actual_script>.
+    # Here, unlocking_script is the four signatures.
+    witness_script = [*sigs, CScript([OP_4, *[k.pub for k in privkeys], OP_4])]
+    witness = CTxInWitness(CScriptWitness(witness_script))
+    tx.wit = CTxWitness([witness])
+    # Make it immutable
+    return CTransaction.from_tx(tx)
