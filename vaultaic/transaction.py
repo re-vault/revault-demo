@@ -121,18 +121,18 @@ def unvault_tx(vault_txid, vault_vout, privkeys, pub_trader1,
     return spend_vault_txout(vault_txid, vault_vout, privkeys, txout)
 
 
-def emergency_tx(vault_txid, vault_vout, privkeys, emer_pubkeys, value):
-    """The transaction which spends from a vault txo.
+def emergency_vault_tx(vault_txid, vault_vout, privkeys, emer_pubkeys, value):
+    """The transaction which moves a vault's coins to the offline 4of4.
 
     :param vault_txid: The id of the transaction funding the vault.
     :param vault_vout: The index of the vault output in this transaction.
     :param privkeys: A list of the private keys of the four stakeholders to
                      sign the transaction.
-    :param pubkeys: A list of the four emergency public keys of the four
-                    stakeholders.
+    :param emer_pubkeys: A list of the four emergency public keys of the four
+                         stakeholders.
     :param value: The output value in satoshis.
 
-    :return: The signed unvaulting transaction, a CTransaction.
+    :return: The signed emrgency transaction, a CTransaction.
     """
     # We pay to the emergency script
     txout = emergency_txout(emer_pubkeys, value)
