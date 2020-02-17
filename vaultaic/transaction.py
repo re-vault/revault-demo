@@ -30,28 +30,30 @@ def vault_txout(pubkeys, value):
     return CTxOut(value, p2wsh)
 
 
-def unvault_txout(pub_trader1, pub_trader2, pub1, pub2, pub_server, value):
+def unvault_script(pub_trader1, pub_trader2, pub1, pub2, pub_server):
+    return CScript([pub_trader1, OP_CHECKSIG, OP_SWAP, pub_trader2,
+                    OP_CHECKSIG, OP_ADD, OP_SWAP, pub1, OP_CHECKSIG, OP_ADD,
+                    OP_DUP, OP_3, OP_EQUAL, OP_IF, OP_SWAP, pub2,
+                    OP_CHECKSIG, OP_ELSE, OP_2, OP_EQUALVERIFY, pub_server,
+                    OP_CHECKSIGVERIFY, OP_6, OP_CHECKSEQUENCEVERIFY,
+                    OP_ENDIF])
+
+
+# FIXME: Make sure the two traders are part of the stakeholders !!
+def unvault_txout(pubkeys, pub_server, value):
     """The output of the unvaulting transaction (which spends the funding one).
 
     This transaction locks coins to server + 2of3 composed of [trader1,
     trader2, stakeholder1] after 6 blocks, or to a 4of4 composed of [trader1,
     trader2, stastakeholder1, stastakeholder2] immediately.
 
-    :param pub_trader1: The pubkey of the first trader, as bytes.
-    :param pub_trader2: The pubkey of the second trader, as bytes.
-    :param pub1: The pubkey of the first stakeholder, as bytes.
-    :param pub2: The pubkey of the second stakeholder, as bytes.
+    :param pubkeys: The pubkeys of the 4 stakeholders, as bytes.
     :param pub_server: The pubkey of the cosigning server, as bytes.
     :param value: The output value in satoshis.
 
     :return: A CTxOut paying to the script detailed above.
     """
-    script = CScript([pub_trader1, OP_CHECKSIG, OP_SWAP, pub_trader2,
-                      OP_CHECKSIG, OP_ADD, OP_SWAP, pub1, OP_CHECKSIG, OP_ADD,
-                      OP_DUP, OP_3, OP_EQUAL, OP_IF, OP_SWAP, pub2,
-                      OP_CHECKSIG, OP_ELSE, OP_2, OP_EQUALVERIFY, pub_server,
-                      OP_CHECKSIGVERIFY, OP_6, OP_CHECKSEQUENCEVERIFY,
-                      OP_ENDIF])
+    script = unvault_script(*pubkeys, pub_server)
     p2wsh = CScript([OP_0, hashlib.sha256(script).digest()])
     return CTxOut(value, p2wsh)
 
@@ -141,13 +143,14 @@ def emergency_vault_tx(vault_txid, vault_vout, privkeys, emer_pubkeys, value):
 
 # FIXME: Make sure the two traders are actually two stakeholders
 def emergency_unvault_tx(unvault_txid, unvault_vout, privkeys,
-                         emer_pubkeys, value):
+                         pub_server, emer_pubkeys, value):
     """The transaction which reverts a spend_tx to the offline 4of4.
 
     :param unvault_txid: The id of the unvaulting transaction.
     :param unvault_vout: The index of the unvault output in this transaction.
     :param privkeys: A list of the private keys of the four stakeholders to
                      sign the transaction.
+    :param pub_server: The public key of the cosigning server.
     :param emer_pubkeys: A list of the four emergency public keys of the four
                          stakeholders.
     :param value: The output value in satoshis.
@@ -167,7 +170,8 @@ def emergency_unvault_tx(unvault_txid, unvault_vout, privkeys,
     sigs = [key.sign(tx_hash) + bytes([SIGHASH_ALL]) for key in privkeys]
     # Spending a P2WSH, so the witness is <unlocking_script> <actual_script>.
     # Here, unlocking_script is the four signatures.
-    witness_script = [*sigs, CScript([OP_4, *[k.pub for k in privkeys], OP_4])]
+    witness_script = [*sigs,
+                      unvault_script(*[k.pub for k in privkeys], pub_server)]
     witness = CTxInWitness(CScriptWitness(witness_script))
     tx.wit = CTxWitness([witness])
     # Make it immutable
