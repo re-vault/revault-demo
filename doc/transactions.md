@@ -66,7 +66,8 @@ blocks.
 
 ### vault_emergency_tx
 
-This transaction takes coins from a `vault_tx` and locks them to a 4-of-4 with 4 different keys.
+This transaction takes coins from a `vault_tx` and locks them to a 4-of-4 (with the 4 keys
+being differents from the vault keys).
 
 - version: 2
 - locktime: 0
@@ -85,6 +86,33 @@ This transaction takes coins from a `vault_tx` and locks them to a 4-of-4 with 4
 - count: 1
 - outputs[0]:
     - value: `<vault_tx output value - fees>`
+    - scriptPubkey: `0x00 0x20 SHA256(<script>)`, with
+        ```
+        <script> = 4 <emer_pubkey1> <emer_pubkey2> <emer_pubkey3> <emer_pubkey4> 4 OP_CHECKMULTISIG
+        ```
+
+### unvault_emergency_tx
+
+This transaction takes coins from an `unvault_tx` and locks them to a 4-of-4 (with the 4 keys
+being differents from the vault keys).
+
+- version: 2
+- locktime: 0
+
+#### IN
+
+- count: 1
+- inputs[0]:
+    - txid: `<unvault_tx txid>`
+    - sequence: `0xffffffff` # FIXME: RBF ?
+    - scriptSig: `<empty>`
+    - witness: `0 <sig pubkey1> <sig pubkey2> <sig pubkey3> <sig pubkey4>`
+
+#### OUT
+
+- count: 1
+- outputs[0]:
+    - value: `<unvault_tx output value - fees>`
     - scriptPubkey: `0x00 0x20 SHA256(<script>)`, with
         ```
         <script> = 4 <emer_pubkey1> <emer_pubkey2> <emer_pubkey3> <emer_pubkey4> 4 OP_CHECKMULTISIG
