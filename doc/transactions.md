@@ -62,6 +62,31 @@ blocks.
         OP_ENDIF
         ```
 
+## spend_tx
+
+The transaction which spends the unvaulting transaction, only spendable after 6
+blocks.
+
+- version: 2
+- locktime: 0
+
+#### IN
+
+- count: 1
+- inputs[0]:
+    - txid: `<unvault_tx txid>`
+    - sequence: `0x00000006`
+    - scriptSig: `<empty>`
+    - witness: `0 <sig pubkey1> <sig pubkey2> <sig pubkey3> <sig pubkey4> <unvault_tx's locking script>`
+
+#### OUT
+
+- count: 1
+- outputs[0]:
+    - value: `<vault_tx output value - tx_fee>`
+    - scriptPubkey: not specified
+
+
 ## emergency_txs
 
 ### vault_emergency_tx
@@ -79,7 +104,7 @@ being differents from the vault keys).
     - txid: `<vault_tx txid>`
     - sequence: `0xffffffff`
     - scriptSig: `<empty>`
-    - witness: `0 <sig pubkey1> <sig pubkey2> <sig pubkey3> <sig pubkey4>`
+    - witness: `0 <sig pubkey1> <sig pubkey2> <sig pubkey3> <sig pubkey4> <vault_tx's locking script>`
 
 #### OUT
 
@@ -106,7 +131,7 @@ being differents from the vault keys).
     - txid: `<unvault_tx txid>`
     - sequence: `0xffffffff` # FIXME: RBF ?
     - scriptSig: `<empty>`
-    - witness: `0 <sig pubkey1> <sig pubkey2> <sig pubkey3> <sig pubkey4>`
+    - witness: `0 <sig pubkey1> <sig pubkey2> <sig pubkey3> <sig pubkey4> <unvault_tx's locking script>`
 
 #### OUT
 

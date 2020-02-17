@@ -10,7 +10,7 @@ from bitcoin.core.script import (
     OP_2, OP_3, OP_4, OP_6, SignatureHash, SIGHASH_ALL, SIGVERSION_WITNESS_V0,
     CScriptWitness
 )
-from bitcoin.wallet import CKey
+from bitcoin.wallet import CKey, CBitcoinAddress
 
 
 # FIXME: Make Peter Todd accept Kanzure's PRs :(
@@ -176,3 +176,42 @@ def emergency_unvault_tx(unvault_txid, unvault_vout, privkeys,
     tx.wit = CTxWitness([witness])
     # Make it immutable
     return CTransaction.from_tx(tx)
+
+
+def spend_unvault_tx(unvault_txid, unvault_vout, privkeys, pubkeys,
+                     pub_server, address, value):
+    """The transaction which spends the unvault_tx after the relative locktime.
+
+    Note that we logically cannot entirely sign this transaction, as we are
+    from the PoV of a stakeholder and that this transaction needs the signature
+    of the co-signing server.
+
+    :param unvault_txid: The id of the unvaulting transaction.
+    :param unvault_vout: The index of the unvault output in this transaction.
+    :param privkeys: A list of the private keys of two of the three
+                     stakeholders in the 2of3.
+    :param pubkeys: A list of the 4 stakeholders' pubkeys.
+    :param pub_server: The public key of the cosigning server.
+    :param address: The address to "send the coins to", we'll derive the
+                    scriptPubKey out of it.
+    :param value: The output value in satoshis.
+
+    :return: The partially signed unvaulting transaction,
+             a CMutableTransaction.
+    """
+    privkeys = [CKey(k) for k in privkeys]
+    txout = CTxOut(value, CBitcoinAddress(address).to_scriptPubKey())
+    # A dummy txin to create the transaction hash to sign
+    tmp_txin = CTxIn(COutPoint(unvault_txid, unvault_vout), nSequence=6)
+    tx = CMutableTransaction([tmp_txin], [txout])
+    tx_hash = SignatureHash(txout.scriptPubKey, tx, unvault_vout,
+                            SIGHASH_ALL, amount=txout.nValue,
+                            sigversion=SIGVERSION_WITNESS_V0)
+    # A signature per pubkey
+    sigs = [key.sign(tx_hash) + bytes([SIGHASH_ALL]) for key in privkeys]
+    # Spending a P2WSH, so the witness is <unlocking_script> <actual_script>.
+    # Here, part of the unlocking_script is the two signatures.
+    witness_script = [*sigs, unvault_script(*pubkeys, pub_server)]
+    witness = CTxInWitness(CScriptWitness(witness_script))
+    tx.wit = CTxWitness([witness])
+    return tx
