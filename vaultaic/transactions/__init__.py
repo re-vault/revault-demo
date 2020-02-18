@@ -215,3 +215,15 @@ def spend_unvault_tx(unvault_txid, unvault_vout, privkeys, pubkeys,
     witness = CTxInWitness(CScriptWitness(witness_script))
     tx.wit = CTxWitness([witness])
     return tx
+
+
+__all__ = [
+    "vault_txout",
+    "unvault_txout",
+    "emergency_txout",
+    "spend_vault_txout",
+    "unvault_tx",
+    "emergency_vault_tx",
+    "emergency_unvault_tx",
+    "spend_unvault_tx",
+]
