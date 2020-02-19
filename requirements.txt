@@ -1,2 +1,2 @@
 bip32>=0.0.3
-python-bitcoinlib==0.10.2
+git+https://github.com/petertodd/python-bitcoinlib.git@ebc85bf3f75508aba92d3a94cd024670bf25be76

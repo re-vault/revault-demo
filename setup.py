@@ -20,4 +20,5 @@ setup(name="vaultaic",
       license="MIT",
       packages=find_packages(),
       keywords=["bitcoin", "vault"],
-      install_requires=requirements)
+      #install_requires=requirements
+      )
