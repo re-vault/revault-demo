@@ -1,1 +1,2 @@
 bip32>=0.0.3
+python-bitcoinlib==0.10.2

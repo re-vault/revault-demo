@@ -1,4 +1,4 @@
-from setuptools import setup
+from setuptools import setup, find_packages
 import vaultaic
 import io
 
@@ -18,6 +18,6 @@ setup(name="vaultaic",
       author="Antoine Poinsot",
       author_email="darosior@protonmail.com",
       license="MIT",
-      packages=["vaultaic"],
+      packages=find_packages(),
       keywords=["bitcoin", "vault"],
       install_requires=requirements)

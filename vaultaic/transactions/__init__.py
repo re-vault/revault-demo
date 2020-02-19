@@ -2,11 +2,11 @@ import hashlib
 
 from bitcoin.core import (
     CTxOut, CTxIn, CTxInWitness, CTxWitness, CMutableTransaction, CTransaction,
-    COutPoint, b2x
+    COutPoint,
 )
 from bitcoin.core.script import (
-    CScript, OP_CHECKSIG, OP_CHECKSIGVERIFY, OP_SWAP, OP_ADD, OP_DUP, OP_EQUAL,
-    OP_EQUALVERIFY, OP_NOP3, OP_IF, OP_ELSE, OP_ENDIF, OP_0,
+    CScript, OP_CHECKSIG, OP_CHECKSIGVERIFY, OP_CHECKMULTISIG, OP_SWAP, OP_ADD,
+    OP_DUP, OP_EQUAL, OP_EQUALVERIFY, OP_NOP3, OP_IF, OP_ELSE, OP_ENDIF, OP_0,
     OP_2, OP_3, OP_4, OP_6, SignatureHash, SIGHASH_ALL, SIGVERSION_WITNESS_V0,
     CScriptWitness
 )
@@ -17,6 +17,16 @@ from bitcoin.wallet import CKey, CBitcoinAddress
 OP_CHECKSEQUENCEVERIFY = OP_NOP3
 
 
+def vault_script(pubkeys):
+    """The locking script of the funding transaction (not the P2WSH!).
+
+    :param pubkeys: A list containing the pubkey of each stakeholder, as bytes.
+
+    :return: A CScript representing a 4of4.
+    """
+    return CScript([OP_4, *pubkeys, OP_4, OP_CHECKMULTISIG])
+
+
 def vault_txout(pubkeys, value):
     """The output of the funding transaction.
 
@@ -25,7 +35,7 @@ def vault_txout(pubkeys, value):
 
     :return: A CTxOut paying to a 4of4.
     """
-    script = CScript([OP_4, *pubkeys, OP_4])
+    script = vault_script(pubkeys)
     p2wsh = CScript([OP_0, hashlib.sha256(script).digest()])
     return CTxOut(value, p2wsh)
 
@@ -218,6 +228,7 @@ def spend_unvault_tx(unvault_txid, unvault_vout, privkeys, pubkeys,
 
 
 __all__ = [
+    "vault_script",
     "vault_txout",
     "unvault_txout",
     "emergency_txout",

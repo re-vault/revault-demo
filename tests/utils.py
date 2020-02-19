@@ -17,6 +17,7 @@ BITCOIND_CONFIG = {
     "regtest": 1,
     "rpcuser": "rpcuser",
     "rpcpassword": "rpcpass",
+    "addresstype": "bech32",
 }
 
 
@@ -284,7 +285,8 @@ class BitcoinD(TailableProc):
                 wait_for(lambda: len(self.rpc.getrawmempool())
                          >= wait_for_mempool)
         # As of 0.16, generate() is removed; use generatetoaddress.
-        return self.rpc.generatetoaddress(numblocks, self.rpc.getnewaddress())
+        addr = self.rpc.getnewaddress()
+        return self.rpc.generatetoaddress(numblocks, addr)
 
     def simple_reorg(self, height, shift=0):
         """
@@ -337,3 +339,22 @@ class BitcoinD(TailableProc):
 
     def getnewaddress(self):
         return self.rpc.getnewaddress()
+
+    def pay_to(self, address, amount):
+        self.generate_block(2)  # 100 is enough ?
+        txin = self.rpc.listunspent()[-1]
+        tx = self.rpc.createrawtransaction([
+            {"txid": txin["txid"],
+             "vout": txin["vout"],
+             "amount": float(txin["amount"])}
+        ], [
+            {address: float(amount)}
+        ])
+        tx = self.rpc.signrawtransactionwithwallet(tx)["hex"]
+        txid = self.rpc.sendrawtransaction(tx)
+        self.generate_block(1, wait_for_mempool=str(txid))
+        return txid
+
+    def send_tx(self, hex_tx):
+        self.rpc.sendrawtransaction(hex_tx)
+        self.generate_block(1, wait_for_mempool=True)
