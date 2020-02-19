@@ -22,7 +22,7 @@ getcontext().prec = 8
 
 def test_vault_txout(bitcoind):
     """Test that vault_txout() produces a valid output."""
-    amount = Decimal("50") - Decimal("500") * Decimal(10**-8)
+    amount = Decimal("50") - Decimal("500") / Decimal(COIN)
     addresses = [bitcoind.rpc.getnewaddress() for i in range(4)]
     pubkeys = [bytes.fromhex(bitcoind.rpc.getaddressinfo(addr)["pubkey"])
                for addr in addresses]
@@ -31,7 +31,7 @@ def test_vault_txout(bitcoind):
     addr = str(CBitcoinAddress.from_scriptPubKey(txo.scriptPubKey))
     # This makes a transaction with only one vout
     txid = bitcoind.pay_to(addr, amount)
-    new_amount = amount - Decimal("50000") * Decimal(10**-8)
+    new_amount = amount - Decimal("500") / Decimal(COIN)
     addr = bitcoind.getnewaddress()
     tx = bitcoind.rpc.createrawtransaction([{"txid": txid, "vout": 0}],
                                            [{addr: float(new_amount)}])
