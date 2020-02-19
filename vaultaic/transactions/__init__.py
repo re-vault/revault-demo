@@ -44,9 +44,9 @@ def unvault_script(pub_trader1, pub_trader2, pub1, pub2, pub_server):
     return CScript([pub_trader1, OP_CHECKSIG, OP_SWAP, pub_trader2,
                     OP_CHECKSIG, OP_ADD, OP_SWAP, pub1, OP_CHECKSIG, OP_ADD,
                     OP_DUP, OP_3, OP_EQUAL, OP_IF, OP_SWAP, pub2,
-                    OP_CHECKSIG, OP_ELSE, OP_2, OP_EQUALVERIFY, pub_server,
-                    OP_CHECKSIGVERIFY, OP_6, OP_CHECKSEQUENCEVERIFY,
-                    OP_ENDIF])
+                    OP_CHECKSIGVERIFY, OP_ELSE, OP_2, OP_EQUALVERIFY,
+                    pub_server, OP_CHECKSIGVERIFY, OP_6,
+                    OP_CHECKSEQUENCEVERIFY, OP_ENDIF])
 
 
 # FIXME: Make sure the two traders are part of the stakeholders !!

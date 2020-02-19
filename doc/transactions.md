@@ -56,7 +56,7 @@ blocks.
         <script> =
         <trader1_pubkey> OP_CHECKSIG OP_SWAP <trader2_pubkey> OP_CHECKSIG OP_ADD OP_SWAP <stakeholder_pubkey> OP_CHECKSIG OP_ADD OP_DUP 3 OP_EQUAL
         OP_IF
-            OP_SWAP <D> OP_CHECKSIG
+            OP_SWAP <D> OP_CHECKSIGVERIFY
         OP_ELSE
             2 OP_EQUALVERIFY <SERVER> OP_CHECKSIGVERIFY 6 OP_CHECKSEQUENCEVERIFY
         OP_ENDIF
