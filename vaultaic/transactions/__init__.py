@@ -95,7 +95,7 @@ def spend_vault_txout(vault_txid, vault_vout, privkeys, txout):
     privkeys = [CKey(k) for k in privkeys]
     # A dummy txin to create the transaction hash to sign
     tmp_txin = CTxIn(COutPoint(vault_txid, vault_vout))
-    tx = CMutableTransaction([tmp_txin], [txout])
+    tx = CMutableTransaction([tmp_txin], [txout], nVersion=2)
     tx_hash = SignatureHash(txout.scriptPubKey, tx, vault_vout,
                             SIGHASH_ALL, amount=txout.nValue,
                             sigversion=SIGVERSION_WITNESS_V0)
@@ -172,7 +172,7 @@ def emergency_unvault_tx(unvault_txid, unvault_vout, privkeys,
     txout = emergency_txout(emer_pubkeys, value)
     # A dummy txin to create the transaction hash to sign
     tmp_txin = CTxIn(COutPoint(unvault_txid, unvault_vout))
-    tx = CMutableTransaction([tmp_txin], [txout])
+    tx = CMutableTransaction([tmp_txin], [txout], nVersion=2)
     tx_hash = SignatureHash(txout.scriptPubKey, tx, unvault_vout,
                             SIGHASH_ALL, amount=txout.nValue,
                             sigversion=SIGVERSION_WITNESS_V0)
@@ -213,7 +213,7 @@ def spend_unvault_tx(unvault_txid, unvault_vout, privkeys, pubkeys,
     txout = CTxOut(value, CBitcoinAddress(address).to_scriptPubKey())
     # A dummy txin to create the transaction hash to sign
     tmp_txin = CTxIn(COutPoint(unvault_txid, unvault_vout), nSequence=6)
-    tx = CMutableTransaction([tmp_txin], [txout])
+    tx = CMutableTransaction([tmp_txin], [txout], nVersion=2)
     tx_hash = SignatureHash(txout.scriptPubKey, tx, unvault_vout,
                             SIGHASH_ALL, amount=txout.nValue,
                             sigversion=SIGVERSION_WITNESS_V0)
