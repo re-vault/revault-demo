@@ -14,7 +14,7 @@ from bitcoin.wallet import CBitcoinAddress, CKey
 from decimal import Decimal, getcontext
 from fixtures import *  # noqa: F401,F403
 from vaultaic.transactions import (
-    vault_txout, vault_script, unvault_txout, unvault_script,
+    vault_txout, vault_script, unvault_txout, unvault_script, unvault_tx,
 )
 from vaultaic.utils import empty_signature
 
@@ -104,6 +104,7 @@ def test_unvault_txout(bitcoind):
     txo = unvault_txout(stk_pubkeys,
                         serv_privkey.pub, amount)
     txo_addr = str(CBitcoinAddress.from_scriptPubKey(txo.scriptPubKey))
+    # FIXME: This is flaky!!!
     txid = bitcoind.pay_to(txo_addr, amount_for_bitcoind)
     # Reconstruct the transaction but with only two stakeholders signatures
     txin = CTxIn(COutPoint(lx(txid), 0), nSequence=6)
@@ -140,3 +141,31 @@ def test_unvault_txout(bitcoind):
     # It's been 6 blocks now
     bitcoind.send_tx(b2x(tx.serialize()))
     assert bitcoind.has_utxo(addr)
+
+
+def create_vault_tx(bitcoind, pubkeys, amount):
+    """Creates a vault transaction for {amount} *sats*"""
+    txo = vault_txout(pubkeys, amount)
+    addr = str(CBitcoinAddress.from_scriptPubKey(txo.scriptPubKey))
+    # This makes a transaction with only one vout
+    amount_for_bitcoind = Decimal(amount) / Decimal(COIN)
+    txid = bitcoind.pay_to(addr, amount_for_bitcoind)
+    return txid
+
+
+def test_unvault_tx(bitcoind):
+    """This tests the unvault_tx() function."""
+    # The stakeholders, the first two are the traders.
+    stk_privkeys = [os.urandom(32) for i in range(4)]
+    stk_pubkeys = [CKey(k).pub for k in stk_privkeys]
+    # The co-signing server, required by the spend tx
+    serv_privkey = CKey(os.urandom(32))
+    serv_pubkey = serv_privkey.pub
+    # Create the transaction funding the vault
+    amount = 50 * COIN - 500
+    vault_txid = lx(create_vault_tx(bitcoind, stk_pubkeys, amount))
+    # Create the transaction spending from the vault
+    amount_min_fees = amount - 500
+    CTx = unvault_tx(vault_txid, 0, stk_privkeys, serv_pubkey,
+                     amount_min_fees, amount)
+    bitcoind.send_tx(b2x(CTx.serialize()))

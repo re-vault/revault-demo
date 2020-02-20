@@ -81,7 +81,7 @@ def emergency_txout(pubkeys, value):
     return vault_txout(pubkeys, value)
 
 
-def spend_vault_txout(vault_txid, vault_vout, privkeys, txout):
+def spend_vault_txout(vault_txid, vault_vout, privkeys, txout, prev_value):
     """Creates a transaction spending a vault txout.
 
     Note that this transaction only ever has one input and one output.
@@ -93,44 +93,46 @@ def spend_vault_txout(vault_txid, vault_vout, privkeys, txout):
     :param txout: The CTxOut to pay to.
     """
     privkeys = [CKey(k) for k in privkeys]
+    pubkeys = [k.pub for k in privkeys]
     # A dummy txin to create the transaction hash to sign
     tmp_txin = CTxIn(COutPoint(vault_txid, vault_vout))
     tx = CMutableTransaction([tmp_txin], [txout], nVersion=2)
-    tx_hash = SignatureHash(txout.scriptPubKey, tx, vault_vout,
-                            SIGHASH_ALL, amount=txout.nValue,
+    tx_hash = SignatureHash(vault_script(pubkeys), tx, vault_vout,
+                            SIGHASH_ALL, amount=prev_value,
                             sigversion=SIGVERSION_WITNESS_V0)
     # A signature per pubkey
     sigs = [key.sign(tx_hash) + bytes([SIGHASH_ALL]) for key in privkeys]
     # Spending a P2WSH, so the witness is <unlocking_script> <actual_script>.
-    # Here, unlocking_script is the four signatures.
-    witness_script = [*sigs, CScript([OP_4, *[k.pub for k in privkeys], OP_4])]
+    # Here, unlocking_script is the four signatures. Moreover note the 0x00 for
+    # the CHECKMULTISIG bug.
+    witness_script = [bytes(0), *sigs, vault_script(pubkeys)]
     witness = CTxInWitness(CScriptWitness(witness_script))
     tx.wit = CTxWitness([witness])
     # Make it immutable
     return CTransaction.from_tx(tx)
 
 
-def unvault_tx(vault_txid, vault_vout, privkeys, pub_trader1,
-               pub_trader2, pub1, pub2, pub_server, value):
+def unvault_tx(vault_txid, vault_vout, privkeys, pub_server,
+               value, prev_value):
     """The transaction which spends from a vault txo.
 
     :param vault_txid: The id of the transaction funding the vault.
     :param vault_vout: The index of the vault output in this transaction.
     :param privkeys: A list of the private keys of the four stakeholders to
-                     sign the transaction.
-    :param pub_trader1: The pubkey of the first trader, as bytes.
-    :param pub_trader2: The pubkey of the second trader, as bytes.
-    :param pub1: The pubkey of the first stakeholder, as bytes.
-    :param pub2: The pubkey of the second stakeholder, as bytes.
+                     sign the transaction. The public keys to reconstruct the
+                     script are deduced from them.
+                     *The first two keys are assumed to be the traders one !*
     :param pub_server: The pubkey of the cosigning server, as bytes.
     :param value: The output value in satoshis.
+    :param prev_value: The prevout value in satoshis.
 
     :return: The signed unvaulting transaction, a CTransaction.
     """
+    pubkeys = [CKey(k).pub for k in privkeys]
     # We spend to the unvaulting script
-    txout = unvault_txout(pub_trader1, pub_trader2, pub1, pub2,
-                          pub_server, value)
-    return spend_vault_txout(vault_txid, vault_vout, privkeys, txout)
+    txout = unvault_txout(pubkeys, pub_server, value)
+    return spend_vault_txout(vault_txid, vault_vout, privkeys, txout,
+                             prev_value)
 
 
 def emergency_vault_tx(vault_txid, vault_vout, privkeys, emer_pubkeys, value):
