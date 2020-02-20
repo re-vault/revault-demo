@@ -135,7 +135,8 @@ def unvault_tx(vault_txid, vault_vout, privkeys, pub_server,
                              prev_value)
 
 
-def emergency_vault_tx(vault_txid, vault_vout, privkeys, emer_pubkeys, value):
+def emergency_vault_tx(vault_txid, vault_vout, privkeys, emer_pubkeys,
+                       value, prev_value):
     """The transaction which moves a vault's coins to the offline 4of4.
 
     :param vault_txid: The id of the transaction funding the vault.
@@ -150,7 +151,8 @@ def emergency_vault_tx(vault_txid, vault_vout, privkeys, emer_pubkeys, value):
     """
     # We pay to the emergency script
     txout = emergency_txout(emer_pubkeys, value)
-    return spend_vault_txout(vault_txid, vault_vout, privkeys, txout)
+    return spend_vault_txout(vault_txid, vault_vout, privkeys, txout,
+                             prev_value)
 
 
 # FIXME: Make sure the two traders are actually two stakeholders
