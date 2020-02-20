@@ -69,7 +69,8 @@ def test_unvault_txout(bitcoind):
     txo = unvault_txout(stk_pubkeys,
                         serv_privkey.pub, amount)
     txo_addr = str(CBitcoinAddress.from_scriptPubKey(txo.scriptPubKey))
-    txid = bitcoind.pay_to(txo_addr, Decimal(amount) / Decimal(COIN))
+    amount_for_bitcoind = float(Decimal(amount) / Decimal(COIN))
+    txid = bitcoind.pay_to(txo_addr, amount_for_bitcoind)
     # We can spend it immediately if all stakeholders sign (emergency or cancel
     # tx)
     txin = CTxIn(COutPoint(lx(txid), 0))
@@ -78,6 +79,14 @@ def test_unvault_txout(bitcoind):
     new_txo = CTxOut(amount_min_fees,
                      CBitcoinAddress(addr).to_scriptPubKey())
     tx = CMutableTransaction([txin], [new_txo], nVersion=2)
+    # We can't test the signing against bitcoind, but we can at least test the
+    # transaction format
+    bitcoind_tx = bitcoind.rpc.createrawtransaction([
+        {"txid": txid, "vout": 0}
+    ], [
+        {addr: float(Decimal(amount_min_fees) / Decimal(COIN))}
+    ])
+    assert b2x(tx.serialize()) == bitcoind_tx
     tx_hash = SignatureHash(unvault_script(*stk_pubkeys, serv_privkey.pub), tx,
                             0, SIGHASH_ALL, amount, SIGVERSION_WITNESS_V0)
     sigs = [key.sign(tx_hash) + bytes([SIGHASH_ALL])
@@ -95,7 +104,7 @@ def test_unvault_txout(bitcoind):
     txo = unvault_txout(stk_pubkeys,
                         serv_privkey.pub, amount)
     txo_addr = str(CBitcoinAddress.from_scriptPubKey(txo.scriptPubKey))
-    txid = bitcoind.pay_to(txo_addr, Decimal(amount) / Decimal(COIN))
+    txid = bitcoind.pay_to(txo_addr, amount_for_bitcoind)
     # Reconstruct the transaction but with only two stakeholders signatures
     txin = CTxIn(COutPoint(lx(txid), 0), nSequence=6)
     amount_min_fees = amount - 500
@@ -103,6 +112,14 @@ def test_unvault_txout(bitcoind):
     new_txo = CTxOut(amount_min_fees,
                      CBitcoinAddress(addr).to_scriptPubKey())
     tx = CMutableTransaction([txin], [new_txo], nVersion=2)
+    # We can't test the signing against bitcoind, but we can at least test the
+    # transaction format
+    bitcoind_tx = bitcoind.rpc.createrawtransaction([
+        {"txid": txid, "vout": 0, "sequence": 6}
+    ], [
+        {addr: float(Decimal(amount_min_fees) / Decimal(COIN))}
+    ])
+    assert b2x(tx.serialize()) == bitcoind_tx
     tx_hash = SignatureHash(unvault_script(*stk_pubkeys, serv_privkey.pub), tx,
                             0, SIGHASH_ALL, amount, SIGVERSION_WITNESS_V0)
     # The cosigning server
