@@ -15,7 +15,8 @@ from decimal import Decimal, getcontext
 from fixtures import *  # noqa: F401,F403
 from vaultaic.transactions import (
     vault_txout, vault_script, unvault_txout, unvault_script, unvault_tx,
-    emergency_vault_tx, emergency_unvault_tx,
+    emergency_vault_tx, emergency_unvault_tx, sign_unvault_tx,
+    create_unvault_tx,
 )
 from vaultaic.utils import empty_signature
 
@@ -215,3 +216,43 @@ def test_emergency_unvault_tx(bitcoind):
                                serv_pubkey, emer_pubkeys, amount_min_fees,
                                amount)
     bitcoind.send_tx(b2x(CTx.serialize()))
+
+
+def test_spend_unvault_tx(bitcoind):
+    """This tests the emergency_unvault_tx() function."""
+    # The stakeholders, the first two are the traders.
+    stk_privkeys = [os.urandom(32) for i in range(4)]
+    stk_pubkeys = [CKey(k).pub for k in stk_privkeys]
+    # The co-signing server, required by the spend tx
+    serv_privkey = os.urandom(32)
+    serv_pubkey = CKey(serv_privkey).pub
+    # Create the transaction funding the vault
+    amount = 50 * COIN - 500
+    vault_txid = lx(create_vault_tx(bitcoind, stk_pubkeys, amount))
+    # Create the transaction spending from the vault
+    amount_min_fees = amount - 500
+    CTx = unvault_tx(vault_txid, 0, stk_privkeys, serv_pubkey,
+                     amount_min_fees, amount)
+    bitcoind.send_tx(b2x(CTx.serialize()))
+    amount, amount_min_fees = amount_min_fees, amount_min_fees - 500
+    # The address to spend to
+    addr = bitcoind.getnewaddress()
+    txid = CTx.GetTxid()
+    # The first two stakeholders are the traders
+    CTx, sigs = sign_unvault_tx(txid, 0, stk_privkeys[:2], stk_pubkeys,
+                                serv_pubkey, addr, amount_min_fees,
+                                amount)
+    # We need the cosigning server sig, too !
+    CTx, sig_serv = sign_unvault_tx(txid, 0, [serv_privkey], stk_pubkeys,
+                                    serv_pubkey, addr, amount_min_fees,
+                                    amount)
+    # Ok we have all the sigs we need, let's spend it...
+    CTx = create_unvault_tx(CTx, stk_pubkeys, serv_pubkey,
+                            [*sigs, bytes(0), *sig_serv])
+    # ... After the relative locktime !
+    for i in range(5):
+        with pytest.raises(VerifyRejectedError, match="non-BIP68-final"):
+            bitcoind.send_tx(b2x(CTx.serialize()))
+        bitcoind.generate_block(1)
+    bitcoind.send_tx(b2x(CTx.serialize()))
+    assert bitcoind.has_utxo(addr)

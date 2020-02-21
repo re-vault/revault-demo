@@ -193,43 +193,58 @@ def emergency_unvault_tx(unvault_txid, unvault_vout, privkeys,
     return CTransaction.from_tx(tx)
 
 
-def spend_unvault_tx(unvault_txid, unvault_vout, privkeys, pubkeys,
-                     pub_server, address, value):
-    """The transaction which spends the unvault_tx after the relative locktime.
-
-    Note that we logically cannot entirely sign this transaction, as we are
-    from the PoV of a stakeholder and that this transaction needs the signature
-    of the co-signing server.
+def sign_unvault_tx(unvault_txid, unvault_vout, privkeys, pubkeys,
+                    pub_server, address, value, prev_value):
+    """Signs the transaction which spends the unvault_tx after the relative
+    locktime with the given private keys.
 
     :param unvault_txid: The id of the unvaulting transaction.
     :param unvault_vout: The index of the unvault output in this transaction.
-    :param privkeys: A list of the private keys of two of the three
-                     stakeholders in the 2of3.
+    :param privkeys: A list of the private keys to sign the tx with.
     :param pubkeys: A list of the 4 stakeholders' pubkeys.
     :param pub_server: The public key of the cosigning server.
     :param address: The address to "send the coins to", we'll derive the
                     scriptPubKey out of it.
     :param value: The output value in satoshis.
+    :param prev_value: The prevout's value in satoshis.
 
-    :return: The partially signed unvaulting transaction,
-             a CMutableTransaction.
+    :return: A tuple composed of the *unsigned* unvaulting transaction (a
+             CMutableTransaction) and the signatures for the pubkeys.
     """
     privkeys = [CKey(k) for k in privkeys]
     txout = CTxOut(value, CBitcoinAddress(address).to_scriptPubKey())
-    # A dummy txin to create the transaction hash to sign
-    tmp_txin = CTxIn(COutPoint(unvault_txid, unvault_vout), nSequence=6)
-    tx = CMutableTransaction([tmp_txin], [txout], nVersion=2)
-    tx_hash = SignatureHash(txout.scriptPubKey, tx, unvault_vout,
-                            SIGHASH_ALL, amount=txout.nValue,
-                            sigversion=SIGVERSION_WITNESS_V0)
-    # A signature per pubkey
+    txin = CTxIn(COutPoint(unvault_txid, unvault_vout), nSequence=6)
+    tx = CMutableTransaction([txin], [txout], nVersion=2)
+    tx_hash = SignatureHash(unvault_script(*pubkeys, pub_server), tx,
+                            unvault_vout, SIGHASH_ALL, prev_value,
+                            SIGVERSION_WITNESS_V0)
     sigs = [key.sign(tx_hash) + bytes([SIGHASH_ALL]) for key in privkeys]
-    # Spending a P2WSH, so the witness is <unlocking_script> <actual_script>.
-    # Here, part of the unlocking_script is the two signatures.
-    witness_script = [*sigs, unvault_script(*pubkeys, pub_server)]
+    return tx, sigs
+
+
+def create_unvault_tx(tx, pubkeys, serv_pubkey, sigs):
+    """Creates the tx spending the unvault_tx after the relative locktime,
+    from three signatures.
+
+    :param tx: The unsigned transaction, a CMutableTransaction.
+    :param pubkeys: An *ordered* list of the four pubkeys of the stakeholders.
+    :param serv_pubkey: The cosigning server pubkey.
+    :param sigs: An *ordered* list of *four* bytearrays. Any of the first three
+                 can be empty (2of3). The first one is the first trader's
+                 signature, the second one the second trader signature, the
+                 third one the signature of the stakeholder's pubkey used in
+                 the unvaulting script, and the last one the cosigning server's
+                 signature.
+
+    :return: The spending transaction, a CTransaction.
+    """
+    # The sigs are reversed as we request them to be in the same order as the
+    # pubkeys to keep the API simple.
+    witness_script = [*sigs[::-1], unvault_script(*pubkeys, serv_pubkey)]
     witness = CTxInWitness(CScriptWitness(witness_script))
     tx.wit = CTxWitness([witness])
-    return tx
+    # Make it immutable
+    return CTransaction.from_tx(tx)
 
 
 __all__ = [
@@ -241,5 +256,6 @@ __all__ = [
     "unvault_tx",
     "emergency_vault_tx",
     "emergency_unvault_tx",
-    "spend_unvault_tx",
+    "sign_unvault_tx",
+    "create_unvault_tx",
 ]
