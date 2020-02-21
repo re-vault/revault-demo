@@ -15,7 +15,7 @@ from decimal import Decimal, getcontext
 from fixtures import *  # noqa: F401,F403
 from vaultaic.transactions import (
     vault_txout, vault_script, unvault_txout, unvault_script, unvault_tx,
-    emergency_vault_tx
+    emergency_vault_tx, emergency_unvault_tx,
 )
 from vaultaic.utils import empty_signature
 
@@ -187,4 +187,31 @@ def test_emergency_vault_tx(bitcoind):
     amount_min_fees = amount - 500
     CTx = emergency_vault_tx(vault_txid, 0, stk_privkeys, emer_pubkeys,
                              amount_min_fees, amount)
+    bitcoind.send_tx(b2x(CTx.serialize()))
+
+
+def test_emergency_unvault_tx(bitcoind):
+    """This tests the emergency_unvault_tx() function."""
+    # The stakeholders, the first two are the traders.
+    stk_privkeys = [os.urandom(32) for i in range(4)]
+    stk_pubkeys = [CKey(k).pub for k in stk_privkeys]
+    # The stakeholders emergency keys
+    emer_privkeys = [os.urandom(32) for i in range(4)]
+    emer_pubkeys = [CKey(k).pub for k in emer_privkeys]
+    # The co-signing server, required by the spend tx
+    serv_privkey = CKey(os.urandom(32))
+    serv_pubkey = serv_privkey.pub
+    # Create the transaction funding the vault
+    amount = 50 * COIN - 500
+    vault_txid = lx(create_vault_tx(bitcoind, stk_pubkeys, amount))
+    # Create the transaction spending from the vault
+    amount_min_fees = amount - 500
+    CTx = unvault_tx(vault_txid, 0, stk_privkeys, serv_pubkey,
+                     amount_min_fees, amount)
+    bitcoind.send_tx(b2x(CTx.serialize()))
+    amount, amount_min_fees = amount_min_fees, amount_min_fees - 500
+    # Actually vout MUST be 0.
+    CTx = emergency_unvault_tx(CTx.GetTxid(), 0, stk_privkeys,
+                               serv_pubkey, emer_pubkeys, amount_min_fees,
+                               amount)
     bitcoind.send_tx(b2x(CTx.serialize()))
