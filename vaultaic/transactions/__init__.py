@@ -193,8 +193,8 @@ def emergency_unvault_tx(unvault_txid, unvault_vout, privkeys,
     return CTransaction.from_tx(tx)
 
 
-def sign_unvault_tx(unvault_txid, unvault_vout, privkeys, pubkeys,
-                    pub_server, address, value, prev_value):
+def sign_spend_tx(unvault_txid, unvault_vout, privkeys, pubkeys,
+                  pub_server, address, value, prev_value):
     """Signs the transaction which spends the unvault_tx after the relative
     locktime with the given private keys.
 
@@ -222,7 +222,7 @@ def sign_unvault_tx(unvault_txid, unvault_vout, privkeys, pubkeys,
     return tx, sigs
 
 
-def create_unvault_tx(tx, pubkeys, serv_pubkey, sigs):
+def create_spend_tx(tx, pubkeys, serv_pubkey, sigs):
     """Creates the tx spending the unvault_tx after the relative locktime,
     from three signatures.
 
@@ -256,6 +256,6 @@ __all__ = [
     "unvault_tx",
     "emergency_vault_tx",
     "emergency_unvault_tx",
-    "sign_unvault_tx",
-    "create_unvault_tx",
+    "sign_spend_tx",
+    "create_spend_tx",
 ]
