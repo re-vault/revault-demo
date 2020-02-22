@@ -15,7 +15,8 @@ from decimal import Decimal, getcontext
 from fixtures import *  # noqa: F401,F403
 from vaultaic.transactions import (
     vault_txout, vault_script, unvault_txout, unvault_script, unvault_tx,
-    emergency_vault_tx, emergency_unvault_tx, sign_spend_tx, create_spend_tx,
+    emergency_vault_tx, cancel_unvault_tx, emergency_unvault_tx, sign_spend_tx,
+    create_spend_tx,
 )
 from vaultaic.utils import empty_signature
 
@@ -197,6 +198,27 @@ def create_unvault_tx(bitcoind, stk_privkeys, stk_pubkeys, serv_pubkey,
                      amount_unvault, amount_vault)
     bitcoind.send_tx(b2x(CTx.serialize()))
     return CTx.GetTxid()
+
+
+def test_cancel_unvault_tx(bitcoind):
+    """This tests that cancel_unvault_tx() produces a valid transaction."""
+    # The stakeholders, the first two are the traders.
+    stk_privkeys = [os.urandom(32) for i in range(4)]
+    stk_pubkeys = [CKey(k).pub for k in stk_privkeys]
+    # The co-signing server, required by the spend tx
+    serv_privkey = CKey(os.urandom(32))
+    serv_pubkey = serv_privkey.pub
+    # Create the vault and unvault transactions
+    amount_vault = 50 * COIN - 500
+    amount_unvault = amount_vault - 500
+    txid = create_unvault_tx(bitcoind, stk_privkeys, stk_pubkeys, serv_pubkey,
+                             amount_vault, amount_unvault)
+    amount_emer = amount_unvault - 500
+    # We re-spend to the same vault
+    CTx = cancel_unvault_tx(txid, 0, stk_privkeys,
+                            serv_pubkey, stk_pubkeys, amount_emer,
+                            amount_unvault)
+    bitcoind.send_tx(b2x(CTx.serialize()))
 
 
 def test_emergency_unvault_tx(bitcoind):
