@@ -183,11 +183,20 @@ def test_emergency_vault_tx(bitcoind):
     # Create the transaction funding the vault
     amount = 50 * COIN - 500
     vault_txid = lx(create_vault_tx(bitcoind, stk_pubkeys, amount))
-    # Create the transaction spending from the vault
+    # Create the emergency transaction spending from the vault
     amount_min_fees = amount - 500
     CTx = emergency_vault_tx(vault_txid, 0, stk_privkeys, emer_pubkeys,
                              amount_min_fees, amount)
     bitcoind.send_tx(b2x(CTx.serialize()))
+
+
+def create_unvault_tx(bitcoind, stk_privkeys, stk_pubkeys, serv_pubkey,
+                      amount_vault, amount_unvault):
+    vault_txid = lx(create_vault_tx(bitcoind, stk_pubkeys, amount_vault))
+    CTx = unvault_tx(vault_txid, 0, stk_privkeys, serv_pubkey,
+                     amount_unvault, amount_vault)
+    bitcoind.send_tx(b2x(CTx.serialize()))
+    return CTx.GetTxid()
 
 
 def test_emergency_unvault_tx(bitcoind):
@@ -201,23 +210,19 @@ def test_emergency_unvault_tx(bitcoind):
     # The co-signing server, required by the spend tx
     serv_privkey = CKey(os.urandom(32))
     serv_pubkey = serv_privkey.pub
-    # Create the transaction funding the vault
-    amount = 50 * COIN - 500
-    vault_txid = lx(create_vault_tx(bitcoind, stk_pubkeys, amount))
-    # Create the transaction spending from the vault
-    amount_min_fees = amount - 500
-    CTx = unvault_tx(vault_txid, 0, stk_privkeys, serv_pubkey,
-                     amount_min_fees, amount)
-    bitcoind.send_tx(b2x(CTx.serialize()))
-    amount, amount_min_fees = amount_min_fees, amount_min_fees - 500
+    # Create the vault and unvault transactions
+    amount_vault = 50 * COIN - 500
+    amount_unvault = amount_vault - 500
+    txid = create_unvault_tx(bitcoind, stk_privkeys, stk_pubkeys, serv_pubkey,
+                             amount_vault, amount_unvault)
+    amount_emer = amount_unvault - 500
     # Actually vout MUST be 0.
-    CTx = emergency_unvault_tx(CTx.GetTxid(), 0, stk_privkeys,
-                               serv_pubkey, emer_pubkeys, amount_min_fees,
-                               amount)
+    CTx = emergency_unvault_tx(txid, 0, stk_privkeys,
+                               serv_pubkey, emer_pubkeys, amount_emer,
+                               amount_unvault)
     bitcoind.send_tx(b2x(CTx.serialize()))
 
 
-# FIXME: Batch these 3 tests common code !!
 def test_spend_unvault_tx_two_traders(bitcoind):
     """
     This tests the unvault_tx spending with the signature of the two traders.
@@ -228,26 +233,22 @@ def test_spend_unvault_tx_two_traders(bitcoind):
     # The co-signing server, required by the spend tx
     serv_privkey = os.urandom(32)
     serv_pubkey = CKey(serv_privkey).pub
-    # Create the transaction funding the vault
-    amount = 50 * COIN - 500
-    vault_txid = lx(create_vault_tx(bitcoind, stk_pubkeys, amount))
-    # Create the transaction spending from the vault
-    amount_min_fees = amount - 500
-    CTx = unvault_tx(vault_txid, 0, stk_privkeys, serv_pubkey,
-                     amount_min_fees, amount)
-    bitcoind.send_tx(b2x(CTx.serialize()))
-    amount, amount_min_fees = amount_min_fees, amount_min_fees - 500
+    # Create the vault and unvault transactions
+    amount_vault = 50 * COIN - 500
+    amount_unvault = amount_vault - 500
+    txid = create_unvault_tx(bitcoind, stk_privkeys, stk_pubkeys, serv_pubkey,
+                             amount_vault, amount_unvault)
+    amount_spend = amount_unvault - 500
     # The address to spend to
     addr = bitcoind.getnewaddress()
-    txid = CTx.GetTxid()
     # The first two stakeholders are the traders
     CTx, sigs = sign_spend_tx(txid, 0, stk_privkeys[:2], stk_pubkeys,
-                              serv_pubkey, addr, amount_min_fees,
-                              amount)
+                              serv_pubkey, addr, amount_spend,
+                              amount_unvault)
     # We need the cosigning server sig, too !
     CTx, sig_serv = sign_spend_tx(txid, 0, [serv_privkey], stk_pubkeys,
-                                  serv_pubkey, addr, amount_min_fees,
-                                  amount)
+                                  serv_pubkey, addr, amount_spend,
+                                  amount_unvault)
     # Ok we have all the sigs we need, let's spend it...
     CTx = create_spend_tx(CTx, stk_pubkeys, serv_pubkey,
                           [*sigs, bytes(0), *sig_serv])
@@ -271,26 +272,22 @@ def test_spend_unvault_tx_trader_B(bitcoind):
     # The co-signing server, required by the spend tx
     serv_privkey = os.urandom(32)
     serv_pubkey = CKey(serv_privkey).pub
-    # Create the transaction funding the vault
-    amount = 50 * COIN - 500
-    vault_txid = lx(create_vault_tx(bitcoind, stk_pubkeys, amount))
-    # Create the transaction spending from the vault
-    amount_min_fees = amount - 500
-    CTx = unvault_tx(vault_txid, 0, stk_privkeys, serv_pubkey,
-                     amount_min_fees, amount)
-    bitcoind.send_tx(b2x(CTx.serialize()))
-    amount, amount_min_fees = amount_min_fees, amount_min_fees - 500
+    # Create the vault and unvault transactions
+    amount_vault = 50 * COIN - 500
+    amount_unvault = amount_vault - 500
+    txid = create_unvault_tx(bitcoind, stk_privkeys, stk_pubkeys, serv_pubkey,
+                             amount_vault, amount_unvault)
+    amount_spend = amount_unvault - 500
     # The address to spend to
     addr = bitcoind.getnewaddress()
-    txid = CTx.GetTxid()
     # The first two stakeholders are the traders
     CTx, sigs = sign_spend_tx(txid, 0, stk_privkeys[1:3], stk_pubkeys,
-                              serv_pubkey, addr, amount_min_fees,
-                              amount)
+                              serv_pubkey, addr, amount_spend,
+                              amount_unvault)
     # We need the cosigning server sig, too !
     CTx, sig_serv = sign_spend_tx(txid, 0, [serv_privkey], stk_pubkeys,
-                                  serv_pubkey, addr, amount_min_fees,
-                                  amount)
+                                  serv_pubkey, addr, amount_spend,
+                                  amount_unvault)
     # Ok we have all the sigs we need, let's spend it...
     CTx = create_spend_tx(CTx, stk_pubkeys, serv_pubkey,
                           [bytes(0), *sigs, *sig_serv])
@@ -314,26 +311,23 @@ def test_spend_unvault_tx_trader_A(bitcoind):
     # The co-signing server, required by the spend tx
     serv_privkey = os.urandom(32)
     serv_pubkey = CKey(serv_privkey).pub
-    # Create the transaction funding the vault
-    amount = 50 * COIN - 500
-    vault_txid = lx(create_vault_tx(bitcoind, stk_pubkeys, amount))
-    # Create the transaction spending from the vault
-    amount_min_fees = amount - 500
-    CTx = unvault_tx(vault_txid, 0, stk_privkeys, serv_pubkey,
-                     amount_min_fees, amount)
-    bitcoind.send_tx(b2x(CTx.serialize()))
-    amount, amount_min_fees = amount_min_fees, amount_min_fees - 500
+    # Create the vault and unvault transactions
+    amount_vault = 50 * COIN - 500
+    amount_unvault = amount_vault - 500
+    txid = create_unvault_tx(bitcoind, stk_privkeys, stk_pubkeys, serv_pubkey,
+                             amount_vault, amount_unvault)
+    amount_spend = amount_unvault - 500
+
     # The address to spend to
     addr = bitcoind.getnewaddress()
-    txid = CTx.GetTxid()
     # The first two stakeholders are the traders
     CTx, sigs = sign_spend_tx(txid, 0, [stk_privkeys[0], stk_privkeys[2]],
                               stk_pubkeys, serv_pubkey, addr,
-                              amount_min_fees, amount)
+                              amount_spend, amount_unvault)
     # We need the cosigning server sig, too !
     CTx, sig_serv = sign_spend_tx(txid, 0, [serv_privkey], stk_pubkeys,
-                                  serv_pubkey, addr, amount_min_fees,
-                                  amount)
+                                  serv_pubkey, addr, amount_spend,
+                                  amount_unvault)
     # Ok we have all the sigs we need, let's spend it...
     CTx = create_spend_tx(CTx, stk_pubkeys, serv_pubkey,
                           [sigs[0], bytes(0), sigs[1], *sig_serv])
