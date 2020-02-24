@@ -11,7 +11,9 @@ architecture designed by [Chainsmiths](http://chainsmiths.com) for the needs of
 python3 -m venv venv
 . venv/bin/activate
 pip install -r requirements.txt
+# Install vaultaic
+python3 setup.py install
 # Install the tests dependencies
 pip install -r tests/requirements.txt
-pytest -vvv tests/unit_tests.py -n4
+pytest -vvv tests/ -n4
 ```
