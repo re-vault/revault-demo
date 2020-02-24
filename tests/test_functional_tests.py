@@ -24,8 +24,8 @@ def test_vault_address(bitcoind):
     emer_keys = [CKey(os.urandom(32)) for i in range(4)]
     vault = Vault(our_xpriv, all_xpubs, serv_key.pub, emer_keys,
                   bitcoind.rpc.__btc_conf_file__)
-    # bitcoind should return the same address as us
-    for i in range(25):
+    # bitcoind should always return the same address as us
+    for i in range(10):
         vault_first_address = vault.getnewaddress()
         bitcoind_first_address = bitcoind.rpc.addmultisigaddress(4, [
             b2x(BIP32.from_xpub(xpub).get_pubkey_from_path([i]))

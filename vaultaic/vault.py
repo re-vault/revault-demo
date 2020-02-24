@@ -43,11 +43,7 @@ class Vault:
         self.emergency_pubkeys = emergency_pubkeys
         self.current_index = current_index
         self.bitcoind = bitcoin.rpc.RawProxy(btc_conf_file=bitcoin_conf_path)
-        # FIXME: We need something more robust than assuming other stakeholders
-        # won't be more out of sync than +100 of the index.
-        for i in range(current_index, current_index + 100):
-            pubkeys = self.get_pubkeys(i)
-            self.watch_output(vault_txout(pubkeys, 0))
+        self.update_watched_addresses()
 
     def get_pubkeys(self, index):
         """Get all the pubkeys for this {index}.
@@ -70,13 +66,23 @@ class Vault:
         addr = str(CBitcoinAddress.from_scriptPubKey(txo.scriptPubKey))
         self.bitcoind.importaddress(addr, "vaultaic", True)
 
+    def update_watched_addresses(self):
+        """Update the watchonly addresses"""
+        # FIXME: We need something more robust than assuming other stakeholders
+        # won't be more out of sync than +100 of the index.
+        for i in range(self.current_index, self.current_index + 100):
+            pubkeys = self.get_pubkeys(i)
+            self.watch_output(vault_txout(pubkeys, 0))
+
     def getnewaddress(self):
         """Get the next vault address, we bump the derivation index.
 
         :return: (str) The next vault address.
         """
         pubkeys = self.get_pubkeys(self.current_index)
+        txo = vault_txout(pubkeys, 0)
+        addr = str(CBitcoinAddress.from_scriptPubKey(txo.scriptPubKey))
         # Bump afterwards..
         self.current_index += 1
-        txo = vault_txout(pubkeys, 0)
-        return str(CBitcoinAddress.from_scriptPubKey(txo.scriptPubKey))
+        self.update_watched_addresses()
+        return addr
