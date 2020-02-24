@@ -1,2 +1,3 @@
 bip32>=0.0.3
 git+https://github.com/petertodd/python-bitcoinlib.git@ebc85bf3f75508aba92d3a94cd024670bf25be76
+Flask==1.1.1

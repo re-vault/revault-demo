@@ -4,6 +4,7 @@ Rusty Russell or Christian Decker who wrote most of this (I'd put some sats on
 cdecker), so credits to them ! (MIT licensed)
 """
 from utils import BitcoinD
+from vaultaic import sigserver
 
 import logging
 import os
@@ -96,3 +97,9 @@ def bitcoind(directory):
     except Exception:
         bitcoind.proc.kill()
     bitcoind.proc.wait()
+
+
+@pytest.fixture
+def sigserv():
+    with sigserver.test_client() as client:
+        yield client

@@ -1,11 +1,13 @@
 import bitcoin
 import os
+import requests
+import threading
 
 from bip32 import BIP32
 from bitcoin.core import b2x
 from bitcoin.wallet import CKey
 from fixtures import *  # noqa: F401,F403
-from vaultaic import Vault
+from vaultaic import Vault, sigserver
 
 
 bitcoin.SelectParams("regtest")
@@ -32,3 +34,19 @@ def test_vault_address(bitcoind):
             for xpub in all_xpubs
         ])["address"]
         assert vault_first_address == bitcoind_first_address
+
+
+def test_sigserver(bitcoind, sigserv):
+    """We just test that it stores sigs correctly."""
+    sig = "a01f"
+    txid = "0101"
+    stk_id = 1
+    # POST a dummy sig
+    r = sigserv.post("sig/{}/{}".format(txid, stk_id),
+                     data={"sig": sig})
+    assert r.status_code == 201
+    assert r.json == {"sig": sig}
+    # GET it
+    r = sigserv.get("sig/{}/{}".format(txid, stk_id))
+    assert r.status_code == 200
+    assert r.json == {"sig": sig}
