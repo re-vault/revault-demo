@@ -1,4 +1,5 @@
 import bitcoin.rpc
+import requests
 
 from bip32 import BIP32
 from bitcoin.wallet import CBitcoinAddress
@@ -16,7 +17,7 @@ class Vault:
     vault.
     """
     def __init__(self, xpriv, xpubs, server_pubkey, emergency_pubkeys,
-                 bitcoin_conf_path, current_index=0):
+                 bitcoin_conf_path, sigserver_url, current_index=0):
         """
         We need the xpub of all the other stakeholders to derive their pubkeys.
 
@@ -30,6 +31,8 @@ class Vault:
         :param emergency_pubkeys: A list of the four offline keys of the
                                   stakeholders, as bytes.
         :param bitcoin_conf_path: Path to bitcoin.conf.
+        :param sigserver_url: The url of the server to post / get the sigs from
+                              other stakeholders.
         """
         assert len(xpubs) == 4
         self.our_bip32 = BIP32.from_xpriv(xpriv)
@@ -41,8 +44,11 @@ class Vault:
                 self.keychains.append(None)
         self.server_pubkey = server_pubkey
         self.emergency_pubkeys = emergency_pubkeys
-        self.current_index = current_index
         self.bitcoind = bitcoin.rpc.RawProxy(btc_conf_file=bitcoin_conf_path)
+        self.sigserver_url = sigserver_url
+        if self.sigserver_url.endswith('/'):
+            self.sigserver_url = self.sigserver_url[:-1]
+        self.current_index = current_index
         self.update_watched_addresses()
 
     def get_pubkeys(self, index):
@@ -86,3 +92,18 @@ class Vault:
         self.current_index += 1
         self.update_watched_addresses()
         return addr
+
+    def send_signature(self, txid, sig):
+        """Send the signature {sig} for tx {txid} to the sig server."""
+        if isinstance(sig, bytes):
+            sig = sig.hex()
+        elif not isinstance(sig, str):
+            raise Exception("The signature must be either bytes or a valid hex"
+                            " string")
+        stakeholder_id = self.keychains.index(None) + 1
+        r = requests.post("{}/sig/{}/{}".format(self.sigserver_url, txid,
+                                                stakeholder_id),
+                          data={"sig": sig})
+        if not r.status_code == 201:
+            raise Exception("stakeholder #{}: Could not send sig '{}' for"
+                            " txid {}.".format(stakeholder_id, sig, txid))

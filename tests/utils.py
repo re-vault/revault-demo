@@ -22,6 +22,7 @@ BITCOIND_CONFIG = {
 
 
 TIMEOUT = int(os.getenv("TIMEOUT", 60))
+SIGSERV_URL = os.getenv("SIGSERV_URL", "")
 
 
 def wait_for(success, timeout=TIMEOUT):
