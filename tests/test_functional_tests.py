@@ -47,20 +47,21 @@ def get_random_vault(bitcoind_conf, our_seed=None, xpubs=None,
 
 
 def test_vault_address(bitcoind):
-    vault = get_random_vault(bitcoind.rpc.__btc_conf_file__)
-    # It's burdensome to our xpub to be None in the list, but it allows us to
-    # know which of the stakeholders we are, so..
-    all_xpubs = [keychain.get_master_xpub() if keychain
-                 else vault.our_bip32.get_master_xpub()
-                 for keychain in vault.keychains]
-    # bitcoind should always return the same address as us
-    for i in range(10):
-        vault_first_address = vault.getnewaddress()
-        bitcoind_first_address = bitcoind.rpc.addmultisigaddress(4, [
-            b2x(BIP32.from_xpub(xpub).get_pubkey_from_path([i]))
-            for xpub in all_xpubs
-        ])["address"]
-        assert vault_first_address == bitcoind_first_address
+    for i in range(1, 4):
+        vault = get_random_vault(bitcoind.rpc.__btc_conf_file__, whoami=i)
+        # It's burdensome to our xpub to be None in the list, but it allows us
+        # to know which of the stakeholders we are, so..
+        all_xpubs = [keychain.get_master_xpub() if keychain
+                     else vault.our_bip32.get_master_xpub()
+                     for keychain in vault.keychains]
+        # bitcoind should always return the same address as us
+        for i in range(3):
+            vault_first_address = vault.getnewaddress()
+            bitcoind_first_address = bitcoind.rpc.addmultisigaddress(4, [
+                b2x(BIP32.from_xpub(xpub).get_pubkey_from_path([i]))
+                for xpub in all_xpubs
+            ])["address"]
+            assert vault_first_address == bitcoind_first_address
 
 
 def test_sigserver(bitcoind, sigserv):
