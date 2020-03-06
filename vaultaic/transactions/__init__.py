@@ -49,7 +49,6 @@ def unvault_script(pub_trader1, pub_trader2, pub1, pub2, pub_server):
                     OP_CHECKSEQUENCEVERIFY, OP_ENDIF])
 
 
-# FIXME: Make sure the two traders are part of the stakeholders !!
 def unvault_txout(pubkeys, pub_server, value):
     """The output of the unvaulting transaction (which spends the funding one).
 
@@ -81,16 +80,21 @@ def emergency_txout(pubkeys, value):
     return vault_txout(pubkeys, value)
 
 
-def spend_vault_txout(vault_txid, vault_vout, privkeys, txout, prev_value):
-    """Creates a transaction spending a vault txout.
+def sign_spend_vault_txout(vault_txid, vault_vout, privkeys, txout,
+                           prev_value):
+    """Creates a transaction spending a vault txout, and signs it with the
+    given private keys.
 
     Note that this transaction only ever has one input and one output.
 
-    :param vault_txid: The id of the transaction funding the vault.
+    :param vault_txid: The id of the transaction funding the vault, as bytes.
     :param vault_vout: The index of the vault output in this transaction.
     :param privkeys: A list of the private keys of the four stakeholders to
                      sign the transaction.
     :param txout: The CTxOut to pay to.
+    :param prev_value: The value of the vault txout we spend.
+
+    :return: A tuple composed of the *unsigned* transaction and the sigs.
     """
     privkeys = [CKey(k) for k in privkeys]
     pubkeys = [k.pub for k in privkeys]
@@ -102,6 +106,20 @@ def spend_vault_txout(vault_txid, vault_vout, privkeys, txout, prev_value):
                             sigversion=SIGVERSION_WITNESS_V0)
     # A signature per pubkey
     sigs = [key.sign(tx_hash) + bytes([SIGHASH_ALL]) for key in privkeys]
+    return tx, sigs
+
+
+def create_spend_vault_txout(tx, pubkeys, sigs):
+    """Forms the final transaction spending a vault txout.
+
+    :param tx: The unsigned transaction, as a CMutableTransaction.
+    :param pubkeys: A list containing the pubkey of each of the four
+                    stakeholders.
+    :param sigs: A list of the four signatures for the four pubkeys, in the
+                 same order.
+
+    :return: The immutable CTransaction.
+    """
     # Spending a P2WSH, so the witness is <unlocking_script> <actual_script>.
     # Here, unlocking_script is the four signatures. Moreover note the empty
     # byte array for the CHECKMULTISIG bug.
@@ -131,15 +149,16 @@ def unvault_tx(vault_txid, vault_vout, privkeys, pub_server,
     pubkeys = [CKey(k).pub for k in privkeys]
     # We spend to the unvaulting script
     txout = unvault_txout(pubkeys, pub_server, value)
-    return spend_vault_txout(vault_txid, vault_vout, privkeys, txout,
-                             prev_value)
+    tx, sigs = sign_spend_vault_txout(vault_txid, vault_vout, privkeys,
+                                      txout, prev_value)
+    return create_spend_vault_txout(tx, pubkeys, sigs)
 
 
 def emergency_vault_tx(vault_txid, vault_vout, privkeys, emer_pubkeys,
                        value, prev_value):
     """The transaction which moves a vault's coins to the offline 4of4.
 
-    :param vault_txid: The id of the transaction funding the vault.
+    :param vault_txid: The id of the transaction funding the vault, as bytes.
     :param vault_vout: The index of the vault output in this transaction.
     :param privkeys: A list of the private keys of the four stakeholders to
                      sign the transaction.
@@ -151,8 +170,9 @@ def emergency_vault_tx(vault_txid, vault_vout, privkeys, emer_pubkeys,
     """
     # We pay to the emergency script
     txout = emergency_txout(emer_pubkeys, value)
-    return spend_vault_txout(vault_txid, vault_vout, privkeys, txout,
-                             prev_value)
+    tx, sigs = sign_spend_vault_txout(vault_txid, vault_vout, privkeys,
+                                      txout, prev_value)
+    return create_spend_vault_txout(tx, emer_pubkeys, sigs)
 
 
 def spend_unvault_txout(unvault_txid, unvault_vout, privkeys,
@@ -214,7 +234,6 @@ def cancel_unvault_tx(unvault_txid, unvault_vout, privkeys,
                                pub_server, txout, prev_value)
 
 
-# FIXME: Make sure the two traders are actually two stakeholders
 def emergency_unvault_tx(unvault_txid, unvault_vout, privkeys,
                          pub_server, emer_pubkeys, value, prev_value):
     """The transaction which reverts a spend_tx to the offline 4of4.
