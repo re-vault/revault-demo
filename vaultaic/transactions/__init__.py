@@ -80,8 +80,8 @@ def emergency_txout(pubkeys, value):
     return vault_txout(pubkeys, value)
 
 
-def sign_spend_vault_txout(vault_txid, vault_vout, privkeys, txout,
-                           prev_value):
+def sign_spend_vault_txout(vault_txid, vault_vout, txout, pubkeys,
+                           prev_value, privkeys):
     """Creates a transaction spending a vault txout, and signs it with the
     given private keys.
 
@@ -89,15 +89,15 @@ def sign_spend_vault_txout(vault_txid, vault_vout, privkeys, txout,
 
     :param vault_txid: The id of the transaction funding the vault, as bytes.
     :param vault_vout: The index of the vault output in this transaction.
+    :param txout: The CTxOut to pay to.
+    :param pubkeys: A list of each stakeholder's pubkey.
+    :param prev_value: The value of the vault txout we spend.
     :param privkeys: A list of the private keys of the four stakeholders to
                      sign the transaction.
-    :param txout: The CTxOut to pay to.
-    :param prev_value: The value of the vault txout we spend.
 
     :return: A tuple composed of the *unsigned* transaction and the sigs.
     """
     privkeys = [CKey(k) for k in privkeys]
-    pubkeys = [k.pub for k in privkeys]
     # A dummy txin to create the transaction hash to sign
     tmp_txin = CTxIn(COutPoint(vault_txid, vault_vout))
     tx = CMutableTransaction([tmp_txin], [txout], nVersion=2)
@@ -130,48 +130,73 @@ def create_spend_vault_txout(tx, pubkeys, sigs):
     return CTransaction.from_tx(tx)
 
 
-def unvault_tx(vault_txid, vault_vout, privkeys, pub_server,
-               value, prev_value):
-    """The transaction which spends from a vault txo.
+def create_and_sign_unvault_tx(vault_txid, vault_vout, pubkeys, pub_server,
+                               value, prev_value, privkeys):
+    """Create the transaction which spends from a vault txo, then sign it using
+    the provided keys.
 
     :param vault_txid: The id of the transaction funding the vault.
     :param vault_vout: The index of the vault output in this transaction.
-    :param privkeys: A list of the private keys of the four stakeholders to
-                     sign the transaction. The public keys to reconstruct the
-                     script are deduced from them.
-                     *The first two keys are assumed to be the traders one !*
+    :param pubkeys: A list containing the public key of each stakeholder.
     :param pub_server: The pubkey of the cosigning server, as bytes.
     :param value: The output value in satoshis.
-    :param prev_value: The prevout value in satoshis.
+    :param prev_value: The vault output (previout output) value in satoshis.
+    :param privkeys: A list of the private keys to sign the transaction with.
 
-    :return: The signed unvaulting transaction, a CTransaction.
+    :return: A tuple composed of the *unsigned* unvaulting transaction and the
+             list of the signatures for this transaction.
     """
-    pubkeys = [CKey(k).pub for k in privkeys]
     # We spend to the unvaulting script
     txout = unvault_txout(pubkeys, pub_server, value)
-    tx, sigs = sign_spend_vault_txout(vault_txid, vault_vout, privkeys,
-                                      txout, prev_value)
+    return sign_spend_vault_txout(vault_txid, vault_vout, txout, pubkeys,
+                                  prev_value, privkeys)
+
+
+def form_unvault_tx(tx, pubkeys, sigs):
+    """Form the unvault transaction out of the signatures.
+
+    :param tx: The unsigned unvault transaction.
+    :param pubkeys: A list containing the public key of each stakeholder.
+    :param sigs: A list of the signatures in the same order than the public
+                 keys.
+
+    :return: The signed immutable unvault transaction, a CTransaction.
+    """
     return create_spend_vault_txout(tx, pubkeys, sigs)
 
 
-def emergency_vault_tx(vault_txid, vault_vout, privkeys, emer_pubkeys,
-                       value, prev_value):
+def create_and_sign_emergency_vault_tx(vault_txid, vault_vout, pubkeys,
+                                       value, prev_value, emer_pubkeys,
+                                       privkeys):
     """The transaction which moves a vault's coins to the offline 4of4.
 
     :param vault_txid: The id of the transaction funding the vault, as bytes.
     :param vault_vout: The index of the vault output in this transaction.
-    :param privkeys: A list of the private keys of the four stakeholders to
-                     sign the transaction.
+    :param pubkeys: A list containing the public key of each stakeholder.
+    :param value: The output value in satoshis.
     :param emer_pubkeys: A list of the four emergency public keys of the four
                          stakeholders.
-    :param value: The output value in satoshis.
+    :param privkeys: A list of the private keys of the four stakeholders to
+                     sign the transaction.
 
-    :return: The signed emrgency transaction, a CTransaction.
+    :return: A tuple, the *unsigned* emergency transaction and the signatures.
     """
     # We pay to the emergency script
     txout = emergency_txout(emer_pubkeys, value)
-    tx, sigs = sign_spend_vault_txout(vault_txid, vault_vout, privkeys,
-                                      txout, prev_value)
+    return sign_spend_vault_txout(vault_txid, vault_vout, txout, pubkeys,
+                                  prev_value, privkeys)
+
+
+def form_emergency_vault_tx(tx, emer_pubkeys, sigs):
+    """Form the emergency transaction out of the signatures.
+
+    :param tx: The unsigned unvault transaction.
+    :param pubkeys: A list containing the public key of each stakeholder.
+    :param sigs: A list of the signatures in the same order than the public
+                 keys.
+
+    :return: The signed immutable emergency transaction, a CTransaction.
+    """
     return create_spend_vault_txout(tx, emer_pubkeys, sigs)
 
 

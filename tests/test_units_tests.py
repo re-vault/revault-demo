@@ -14,9 +14,10 @@ from bitcoin.wallet import CBitcoinAddress, CKey
 from decimal import Decimal, getcontext
 from fixtures import *  # noqa: F401,F403
 from vaultaic.transactions import (
-    vault_txout, vault_script, unvault_txout, unvault_script, unvault_tx,
-    emergency_vault_tx, cancel_unvault_tx, emergency_unvault_tx, sign_spend_tx,
-    create_spend_tx,
+    vault_txout, vault_script, unvault_txout, unvault_script,
+    create_and_sign_unvault_tx, form_unvault_tx,
+    create_and_sign_emergency_vault_tx, form_emergency_vault_tx,
+    cancel_unvault_tx, emergency_unvault_tx, sign_spend_tx, create_spend_tx,
 )
 from vaultaic.utils import empty_signature
 
@@ -168,8 +169,10 @@ def test_unvault_tx(bitcoind):
     vault_txid = lx(create_vault_tx(bitcoind, stk_pubkeys, amount))
     # Create the transaction spending from the vault
     amount_min_fees = amount - 500
-    CTx = unvault_tx(vault_txid, 0, stk_privkeys, serv_pubkey,
-                     amount_min_fees, amount)
+    CMTx, sigs = create_and_sign_unvault_tx(vault_txid, 0, stk_pubkeys,
+                                            serv_pubkey, amount_min_fees,
+                                            amount, stk_privkeys)
+    CTx = form_unvault_tx(CMTx, stk_pubkeys, sigs)
     bitcoind.send_tx(b2x(CTx.serialize()))
 
 
@@ -186,16 +189,20 @@ def test_emergency_vault_tx(bitcoind):
     vault_txid = lx(create_vault_tx(bitcoind, stk_pubkeys, amount))
     # Create the emergency transaction spending from the vault
     amount_min_fees = amount - 500
-    CTx = emergency_vault_tx(vault_txid, 0, stk_privkeys, emer_pubkeys,
-                             amount_min_fees, amount)
+    CMTx, sigs = create_and_sign_emergency_vault_tx(vault_txid, 0, emer_pubkeys,
+                                                    amount_min_fees, amount,
+                                                    stk_privkeys)
+    CTx = form_emergency_vault_tx(CMTx, stk_pubkeys, sigs)
     bitcoind.send_tx(b2x(CTx.serialize()))
 
 
 def create_unvault_tx(bitcoind, stk_privkeys, stk_pubkeys, serv_pubkey,
                       amount_vault, amount_unvault):
     vault_txid = lx(create_vault_tx(bitcoind, stk_pubkeys, amount_vault))
-    CTx = unvault_tx(vault_txid, 0, stk_privkeys, serv_pubkey,
-                     amount_unvault, amount_vault)
+    CMTx, sigs = create_and_sign_unvault_tx(vault_txid, 0, stk_pubkeys,
+                                            serv_pubkey, amount_unvault,
+                                            amount_vault, stk_privkeys)
+    CTx = form_unvault_tx(CMTx, stk_pubkeys, sigs)
     bitcoind.send_tx(b2x(CTx.serialize()))
     return CTx.GetTxid()
 
