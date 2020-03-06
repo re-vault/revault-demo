@@ -169,10 +169,14 @@ def test_unvault_tx(bitcoind):
     vault_txid = lx(create_vault_tx(bitcoind, stk_pubkeys, amount))
     # Create the transaction spending from the vault
     amount_min_fees = amount - 500
-    CMTx, sigs = create_and_sign_unvault_tx(vault_txid, 0, stk_pubkeys,
-                                            serv_pubkey, amount_min_fees,
-                                            amount, stk_privkeys)
-    CTx = form_unvault_tx(CMTx, stk_pubkeys, sigs)
+    # Simulate that each stakeholder sign the transaction separately
+    all_sigs = []
+    for k in stk_privkeys:
+        CMTx, sigs = create_and_sign_unvault_tx(vault_txid, 0, stk_pubkeys,
+                                                serv_pubkey, amount_min_fees,
+                                                amount, [k])
+        all_sigs += sigs
+    CTx = form_unvault_tx(CMTx, stk_pubkeys, all_sigs)
     bitcoind.send_tx(b2x(CTx.serialize()))
 
 
@@ -189,10 +193,15 @@ def test_emergency_vault_tx(bitcoind):
     vault_txid = lx(create_vault_tx(bitcoind, stk_pubkeys, amount))
     # Create the emergency transaction spending from the vault
     amount_min_fees = amount - 500
-    CMTx, sigs = create_and_sign_emergency_vault_tx(vault_txid, 0, emer_pubkeys,
-                                                    amount_min_fees, amount,
-                                                    stk_privkeys)
-    CTx = form_emergency_vault_tx(CMTx, stk_pubkeys, sigs)
+    # Simulate that each stakeholder sign the transaction separately
+    all_sigs = []
+    for k in stk_privkeys:
+        CMTx, sigs = \
+            create_and_sign_emergency_vault_tx(vault_txid, 0, stk_pubkeys,
+                                               amount_min_fees, amount,
+                                               emer_pubkeys, [k])
+        all_sigs += sigs
+    CTx = form_emergency_vault_tx(CMTx, stk_pubkeys, all_sigs)
     bitcoind.send_tx(b2x(CTx.serialize()))
 
 
