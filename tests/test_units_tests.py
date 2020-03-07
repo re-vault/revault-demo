@@ -107,7 +107,6 @@ def test_unvault_txout(bitcoind):
     txo = unvault_txout(stk_pubkeys,
                         serv_privkey.pub, amount)
     txo_addr = str(CBitcoinAddress.from_scriptPubKey(txo.scriptPubKey))
-    # FIXME: This is flaky!!!
     txid = bitcoind.pay_to(txo_addr, amount_for_bitcoind)
     # Reconstruct the transaction but with only two stakeholders signatures
     txin = CTxIn(COutPoint(lx(txid), 0), nSequence=6)

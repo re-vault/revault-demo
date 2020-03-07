@@ -342,8 +342,13 @@ class BitcoinD(TailableProc):
         return self.rpc.getnewaddress()
 
     def pay_to(self, address, amount):
-        self.generate_block(2)  # 100 is enough ?
-        txin = self.rpc.listunspent()[-1]
+        self.generate_block(1)
+        # So that we can boutique-compute fees in the tests by assuming we work
+        # with 50 * 10**8 sats outputs.
+        addr = self.getnewaddress()
+        txid = self.rpc.sendtoaddress(addr, 50)
+        self.generate_block(1, wait_for_mempool=str(txid))
+        txin = self.rpc.listunspent(None, None, [addr], None, None)[-1]
         tx = self.rpc.createrawtransaction([
             {"txid": txin["txid"],
              "vout": txin["vout"],
