@@ -78,6 +78,9 @@ def test_sigserver(bitcoind, sigserv):
     r = sigserv.get("sig/{}/{}".format(txid, stk_id))
     assert r.status_code == 200
     assert r.json == {"sig": sig}
+    # GET emergency feerate
+    r = sigserv.get("emergency_feerate/{}".format(txid))
+    assert r.status_code == 200
 
 
 @unittest.skipIf(SIGSERV_URL == "", "We want to test against a running Flask"
