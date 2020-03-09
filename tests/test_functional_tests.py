@@ -43,7 +43,7 @@ def get_random_vault(bitcoind_conf, our_seed=None, xpubs=None,
     else:
         sigserv_url = SIGSERV_URL
     return Vault(our_xpriv, all_xpubs, serv_pubkey, emer_pubkeys,
-                 bitcoind_conf, sigserv_url)  # Flask debug url
+                 bitcoind_conf, sigserv_url)
 
 
 def test_vault_address(bitcoind):

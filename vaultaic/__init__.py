@@ -1,9 +1,9 @@
 from .vault import Vault
-from .sigserver import sigserver
+from .sigserver import SigServer
 
 __all__ = [
     "Vault",
-    "sigserver",
+    "SigServer",
 ]
 
 __version__ = "0.0.1"
