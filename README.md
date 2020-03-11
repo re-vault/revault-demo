@@ -21,10 +21,10 @@ pytest -vvv tests/ -n4
 Some tests need a non-pytest-fixture Flask instance and will be skipped by the
 above command, to run them:
 ```
-# Set the URL to run the API at
-export SIGSERV_URL="127.0.0.1:5000" # The default
-# Start the server (preferably in another term, or in background)
-python3 tests/start_sigserver.py
+# Start regtest, say the 5th bitcoind is the serv's bitcoind
+start_regtest 5
+# Start the signature server
+. tests/start_sigserver regtest/bcdir5/bitcoin.conf
 # Run the test suite
-pytest -vvv tests/ -n4
+pytest -vvv tests/ -n6
 ```

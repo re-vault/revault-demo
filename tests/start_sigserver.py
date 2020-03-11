@@ -1,6 +1,20 @@
-from utils import SIGSERV_URL
-from vaultaic import SigServer
+import os
+import vaultaic
+import sys
 
-host, port = SIGSERV_URL.split(':') if SIGSERV_URL else (None, None)
-sigserver = SigServer()
-sigserver.run(host=host, port=port, debug=True)
+
+def show_usage():
+    print("usage:")
+    print(" python3 {} <bitcoind_conf_path> [host:port]"
+          .format(sys.argv[0]))
+
+
+if __name__ == "__main__":
+    if len(sys.argv) not in (2, 3):
+        show_usage()
+        sys.exit(1)
+
+    conf_path = os.path.abspath(sys.argv[1])
+    sigserver = vaultaic.SigServer(bitcoind_conf_path=conf_path)
+    host, port = sys.argv[2].split(':') if len(sys.argv) > 2 else (None, None)
+    sigserver.run(host=host, port=port, debug=True)

@@ -26,12 +26,13 @@ def get_random_vault(bitcoind_conf, our_seed=None, xpubs=None,
         others_bip32 = [BIP32.from_seed(os.urandom(32)) for i in range(3)]
         xpubs = [keychain.get_master_xpub() for keychain in others_bip32]
     # Are we one of the traders or a normie stakeholder ?
+    print(whoami)
     if whoami == 1:
         all_xpubs = [our_bip32.get_master_xpub()] + xpubs
     elif whoami == 2:
-        all_xpubs = [xpubs[0], [our_bip32.get_master_xpub()]] + xpubs[1:]
+        all_xpubs = [xpubs[0], our_bip32.get_master_xpub()] + xpubs[1:]
     elif whoami == 3:
-        all_xpubs = xpubs[:1] + [our_bip32.get_master_xpub(), xpubs[2]]
+        all_xpubs = xpubs[:2] + [our_bip32.get_master_xpub(), xpubs[2]]
     elif whoami == 4:
         all_xpubs = xpubs + [our_bip32.get_master_xpub()]
     if serv_pubkey is None:
@@ -42,6 +43,7 @@ def get_random_vault(bitcoind_conf, our_seed=None, xpubs=None,
         sigserv_url = "http://{}".format(SIGSERV_URL)
     else:
         sigserv_url = SIGSERV_URL
+    print(all_xpubs)
     return Vault(our_xpriv, all_xpubs, serv_pubkey, emer_pubkeys,
                  bitcoind_conf, sigserv_url)
 

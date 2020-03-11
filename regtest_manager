@@ -38,7 +38,17 @@ start_regtest () {
 		bc_port=$((10000 + $i))
 		bc_dir="$PREFIX_DIR/bcdir$i"
 		mkdir -p "$bc_dir"
-		eval "$BITCOIND -connect=\"127.0.0.1:$(($bc_port - 1))\" -rpcport=\"$bc_rpc\" -datadir=\"$bc_dir\" -bind=\"127.0.0.1:$bc_port\"" > /dev/null
+		conf_file="$bc_dir/bitcoin.conf"
+		cat <<EOF > "$conf_file"
+[regtest]
+connect=127.0.0.1:$(($bc_port - 1))
+rpcuser=test
+rpcpassword=test
+rpcport=$bc_rpc
+datadir=$bc_dir
+bind=127.0.0.1:$bc_port
+EOF
+		eval "$BITCOIND -datadir=$bc_dir" > /dev/null
 		alias "bdreg$i"="$BITCOIND -connect=127.0.0.1:$(($bc_port - 1)) -rpcport=$bc_rpc -datadir=$bc_dir -bind=127.0.0.1:$bc_port"
 		echo "Started bitcoind #$i with P2P port $bc_port, RPC port $bc_rpc and datadir $bc_dir"
 		alias "bcreg$i"="bitcoin-cli -regtest -rpcpassword=test -rpcuser=test -rpcport=$bc_rpc"
