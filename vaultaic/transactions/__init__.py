@@ -101,7 +101,7 @@ def sign_spend_vault_txout(vault_txid, vault_vout, txout, pubkeys,
     # A dummy txin to create the transaction hash to sign
     tmp_txin = CTxIn(COutPoint(vault_txid, vault_vout))
     tx = CMutableTransaction([tmp_txin], [txout], nVersion=2)
-    tx_hash = SignatureHash(vault_script(pubkeys), tx, vault_vout,
+    tx_hash = SignatureHash(vault_script(pubkeys), tx, 0,
                             SIGHASH_ALL, amount=prev_value,
                             sigversion=SIGVERSION_WITNESS_V0)
     # A signature per pubkey
@@ -224,7 +224,7 @@ def spend_unvault_txout(unvault_txid, unvault_vout, privkeys,
     txin = CTxIn(COutPoint(unvault_txid, unvault_vout))
     tx = CMutableTransaction([txin], [txout], nVersion=2)
     tx_hash = SignatureHash(unvault_script(*pubkeys, pub_server), tx,
-                            unvault_vout, SIGHASH_ALL, prev_value,
+                            0, SIGHASH_ALL, prev_value,
                             SIGVERSION_WITNESS_V0)
     # A signature per pubkey
     sigs = [key.sign(tx_hash) + bytes([SIGHASH_ALL]) for key in privkeys[::-1]]
@@ -304,8 +304,7 @@ def sign_spend_tx(unvault_txid, unvault_vout, privkeys, pubkeys,
     txin = CTxIn(COutPoint(unvault_txid, unvault_vout), nSequence=6)
     tx = CMutableTransaction([txin], [txout], nVersion=2)
     tx_hash = SignatureHash(unvault_script(*pubkeys, pub_server), tx,
-                            unvault_vout, SIGHASH_ALL, prev_value,
-                            SIGVERSION_WITNESS_V0)
+                            0, SIGHASH_ALL, prev_value, SIGVERSION_WITNESS_V0)
     sigs = [key.sign(tx_hash) + bytes([SIGHASH_ALL]) for key in privkeys]
     return tx, sigs
 
