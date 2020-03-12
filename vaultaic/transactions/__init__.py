@@ -334,6 +334,17 @@ def create_spend_tx(tx, pubkeys, serv_pubkey, sigs):
     return CTransaction.from_tx(tx)
 
 
+def get_transaction_size(tx):
+    """Get the size of a CTransaction.
+
+    :param tx: The CTransaction to get the size of.
+
+    :return: (int) The transaction size **in vbytes**
+    """
+    # FIXME: introduce weights into python-bitcoinlib
+    return len(tx.serialize())
+
+
 __all__ = [
     "vault_script",
     "vault_txout",

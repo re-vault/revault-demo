@@ -1,10 +1,14 @@
 import bitcoin.rpc
+import copy
 import requests
+import threading
 
 from bip32 import BIP32
+from bitcoin.core import b2x, lx
 from bitcoin.wallet import CBitcoinAddress
+from decimal import Decimal, getcontext
 from .transactions import (
-    vault_txout,
+    vault_txout, create_and_sign_emergency_vault_tx, get_transaction_size
 )
 
 
@@ -44,12 +48,63 @@ class Vault:
                 self.keychains.append(None)
         self.server_pubkey = server_pubkey
         self.emergency_pubkeys = emergency_pubkeys
+        self.current_index = current_index
+        # FIXME: Use the sig server to adjust the gap limit
+        self.max_index = current_index + 20
+        # Needs to be acquired to access any of the above
+        self.keys_lock = threading.Lock()
+
         self.bitcoind = bitcoin.rpc.RawProxy(btc_conf_file=bitcoin_conf_path)
+        # Needs to be acquired to send RPC commands
+        self.bitcoind_lock = threading.Lock()
+
+        # No lock we don't ever modify it
         self.sigserver_url = sigserver_url
         if self.sigserver_url.endswith('/'):
             self.sigserver_url = self.sigserver_url[:-1]
-        self.current_index = current_index
         self.update_watched_addresses()
+
+        # We keep track of each vault, represented as
+        # {
+        #   "txid": "hex",
+        #   "vout": n,
+        #   "amount": n,
+        #   "emergency_tx": CTransaction,
+        #   "emergency_signed": bool,
+        #   "unvaul_tx": CTransaction or None,
+        #   "unvault_cancel_tx": CTransaction or None,
+        #   "unvault_emergency_tx": CTransaction or None,
+        # }
+        # The amount is in satoshis.
+        self.vaults = []
+        self.vaults_lock = threading.Lock()
+
+        # Small bitcoin amounts don't play well..
+        getcontext().prec = 8
+
+        # Poll for funds until we die
+        self.poller_stop = threading.Event()
+        self.poller = threading.Thread(target=self.poll_for_funds)
+        self.poller.start()
+
+        self.update_emer_stop = threading.Event()
+        self.update_emer_thread =\
+            threading.Thread(target=self.update_all_emergency_signatures)
+
+    def __del__(self):
+        # Stop the thread polling bitcoind
+        self.poller_stop.set()
+        if self.poller is not None:
+            self.poller.join()
+        # Stop the RPC connection to bitcoind
+        self.bitcoind_lock.acquire()
+        self.bitcoind.close()
+        self.bitcoind_lock.release()
+        # Stop the thread updating emergency transactions
+        self.update_emer_stop.set()
+        if self.update_emer_thread is not None \
+                and self.update_emer_thread.is_alive():
+            self.update_emer_thread.join()
 
     def get_pubkeys(self, index):
         """Get all the pubkeys for this {index}.
@@ -57,11 +112,13 @@ class Vault:
         :return: A list of the four pubkeys for this bip32 derivation index.
         """
         pubkeys = []
+        self.keys_lock.acquire()
         for keychain in self.keychains:
             if keychain:
                 pubkeys.append(keychain.get_pubkey_from_path([index]))
             else:
                 pubkeys.append(self.our_bip32.get_pubkey_from_path([index]))
+        self.keys_lock.release()
         return pubkeys
 
     def watch_output(self, txo):
@@ -70,28 +127,119 @@ class Vault:
         :param txo: The output to watch, a CTxOutput.
         """
         addr = str(CBitcoinAddress.from_scriptPubKey(txo.scriptPubKey))
+        self.bitcoind_lock.acquire()
+        # FIXME: Optimise this...
         self.bitcoind.importaddress(addr, "vaultaic", True)
+        self.bitcoind_lock.release()
 
     def update_watched_addresses(self):
         """Update the watchonly addresses"""
-        # FIXME: We need something more robust than assuming other stakeholders
-        # won't be more out of sync than +100 of the index.
-        for i in range(self.current_index, self.current_index + 100):
+        for i in range(self.current_index, self.max_index):
             pubkeys = self.get_pubkeys(i)
             self.watch_output(vault_txout(pubkeys, 0))
+
+    def get_vault_address(self, index):
+        """Get the vault address for index {index}"""
+        pubkeys = self.get_pubkeys(index)
+        txo = vault_txout(pubkeys, 0)
+        return str(CBitcoinAddress.from_scriptPubKey(txo.scriptPubKey))
 
     def getnewaddress(self):
         """Get the next vault address, we bump the derivation index.
 
         :return: (str) The next vault address.
         """
-        pubkeys = self.get_pubkeys(self.current_index)
-        txo = vault_txout(pubkeys, 0)
-        addr = str(CBitcoinAddress.from_scriptPubKey(txo.scriptPubKey))
+        addr = self.get_vault_address(self.current_index)
         # Bump afterwards..
         self.current_index += 1
+        self.max_index += 1
         self.update_watched_addresses()
         return addr
+
+    def get_emergency_feerate(self, txid):
+        """Get the feerate for the emergency transaction.
+
+        :param txid: The emergency transaction id, as str.
+        :return: The feerate in **sat/VByte**, as int.
+        """
+        r = requests.get("{}/emergency_feerate/{}".format(self.sigserver_url,
+                                                          txid))
+        if not r.status_code == 200:
+            raise Exception("The sigserver returned with '{}', saying '{}'"
+                            .format(r.status_code, r.text))
+        btc_perkvb = Decimal(r.json()["feerate"])
+        # Explicit conversion to sat per virtual byte
+        return int(btc_perkvb * Decimal(10**8) / Decimal(1000))
+
+    def guess_index(self, vault_address):
+        """Guess the index used to derive the 4 pubkeys used in this 4of4.
+
+        :param vault_address: (str) The vault P2WSH address.
+
+        :return: The index.
+        """
+        for index in range(self.max_index):
+            if vault_address == self.get_vault_address(index):
+                return index
+        raise Exception("No such vault script with our known pubkeys !")
+
+    def add_new_vault(self, output):
+        """Add a new vault output to our list.
+
+        :param output: A dict corresponding to an entry of `listunspent`.
+        """
+        vault = {
+            "txid": output["txid"],
+            "vout": output["vout"],
+            # This amount is in BTC, we want sats
+            "amount": int(Decimal(output["amount"]) / Decimal(10**8)),
+            # For convenience
+            "address": output["address"],
+        }
+        index = self.guess_index(vault["address"])
+        pubkeys = self.get_pubkeys(index)
+        privkey = self.our_bip32.get_privkey_from_path([index])
+        # Dummy amount to get the feerate..
+        amount = bitcoin.core.COIN
+        dummy_tx, _ = \
+            create_and_sign_emergency_vault_tx(lx(vault["txid"]),
+                                               vault["vout"], pubkeys, amount,
+                                               vault["amount"],
+                                               self.emergency_pubkeys, [])
+        tx_size = get_transaction_size(dummy_tx)
+        fees = self.get_emergency_feerate(b2x(dummy_tx.GetTxid())) * tx_size
+        amount = vault["amount"] - fees
+        emer_tx, sigs = \
+            create_and_sign_emergency_vault_tx(lx(vault["txid"]),
+                                               vault["vout"], pubkeys, amount,
+                                               vault["amount"],
+                                               self.emergency_pubkeys,
+                                               [privkey])
+        self.send_signature(b2x(emer_tx.GetTxid()), sigs[0])
+        self.vaults.append(vault)
+
+    def poll_for_funds(self):
+        """Polls bitcoind to check for received funds.
+
+        If we just went to know of the possession of a new output, it will
+        construct the corresponding emergency transaction and spawn a thread
+        to fetch emergency transactions signatures.
+        """
+        while not self.poller_stop.wait(2):
+            known_outputs = [v["txid"] for v in self.vaults]
+            # FIXME: This is a hack, better keeping track of known vault
+            # addresses.
+            # TODO: Check that there is no weird concurrency acces with the RPC
+            # proxy
+            self.bitcoind_lock.acquire()
+            vault_utxos = [utxo for utxo in self.bitcoind.listunspent()
+                           if not utxo["spendable"]]
+            self.bitcoind_lock.release()
+            for output in vault_utxos:
+                if output["txid"] not in known_outputs:
+                    self.vaults_lock.acquire()
+                    self.add_new_vault(output)
+                    self.vaults_lock.release()
 
     def send_signature(self, txid, sig):
         """Send the signature {sig} for tx {txid} to the sig server."""
@@ -100,6 +248,7 @@ class Vault:
         elif not isinstance(sig, str):
             raise Exception("The signature must be either bytes or a valid hex"
                             " string")
+        # Who am I ?
         stakeholder_id = self.keychains.index(None) + 1
         r = requests.post("{}/sig/{}/{}".format(self.sigserver_url, txid,
                                                 stakeholder_id),
