@@ -78,7 +78,7 @@ EOF
 		done
 		echo -en "\r$n/60 blocks generated"
 	done
-	echo "\n"
+	echo ""
 
 	echo "We generate a fake load of transaction to populate fee estimation buckets"
 	for n in $(seq 4);do
@@ -93,6 +93,7 @@ EOF
 		done
 		echo -en "\r$n/4 rounds completed"
 	done
+	echo ""
 
 	echo "We start generating blocks in the background."
 	generate_regtest &
