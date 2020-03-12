@@ -1,5 +1,4 @@
 import bitcoin.rpc
-import copy
 import requests
 import threading
 
@@ -8,7 +7,8 @@ from bitcoin.core import b2x, lx, COIN
 from bitcoin.wallet import CBitcoinAddress
 from decimal import Decimal, getcontext
 from .transactions import (
-    vault_txout, create_and_sign_emergency_vault_tx, get_transaction_size
+    vault_txout, create_and_sign_emergency_vault_tx, form_emergency_vault_tx,
+    get_transaction_size,
 )
 
 
@@ -69,6 +69,7 @@ class Vault:
         #   "txid": "hex",
         #   "vout": n,
         #   "amount": n,
+        #   "pubkeys": [pk1, pk2, pk3, pk4],
         #   "emergency_tx": CTransaction,
         #   "emergency_signed": bool,
         #   "unvaul_tx": CTransaction or None,
@@ -102,9 +103,12 @@ class Vault:
         self.bitcoind_lock.release()
         # Stop the thread updating emergency transactions
         self.update_emer_stop.set()
-        if self.update_emer_thread is not None \
-                and self.update_emer_thread.is_alive():
-            self.update_emer_thread.join()
+        if self.update_emer_thread is not None:
+            try:
+                self.update_emer_thread.join()
+            except RuntimeError:
+                # Already dead
+                pass
 
     def get_pubkeys(self, index):
         """Get all the pubkeys for this {index}.
@@ -196,27 +200,31 @@ class Vault:
             "pubkeys": [],
             # For convenience
             "address": output["address"],
+            "emergency_tx": None,
+            "emergency_signed": False,
+            "unvaul_tx": None,
+            "unvault_emergency_tx": None,
         }
         index = self.guess_index(vault["address"])
-        pubkeys = self.get_pubkeys(index)
+        vault["pubkeys"] = self.get_pubkeys(index)
         privkey = self.our_bip32.get_privkey_from_path([index])
         # Dummy amount to get the feerate..
         amount = bitcoin.core.COIN
         dummy_tx, _ = \
             create_and_sign_emergency_vault_tx(lx(vault["txid"]),
-                                               vault["vout"], pubkeys, amount,
-                                               vault["amount"],
+                                               vault["vout"], vault["pubkeys"],
+                                               amount, vault["amount"],
                                                self.emergency_pubkeys, [])
         tx_size = get_transaction_size(dummy_tx)
         fees = self.get_emergency_feerate(b2x(dummy_tx.GetTxid())) * tx_size
         amount = vault["amount"] - fees
-        emer_tx, sigs = \
+        vault["emergency_tx"], sigs = \
             create_and_sign_emergency_vault_tx(lx(vault["txid"]),
-                                               vault["vout"], pubkeys, amount,
-                                               vault["amount"],
+                                               vault["vout"], vault["pubkeys"],
+                                               amount, vault["amount"],
                                                self.emergency_pubkeys,
                                                [privkey])
-        self.send_signature(b2x(emer_tx.GetTxid()), sigs[0])
+        self.send_signature(b2x(vault["emergency_tx"].GetTxid()), sigs[0])
         self.vaults.append(vault)
 
     def poll_for_funds(self):
@@ -226,21 +234,29 @@ class Vault:
         construct the corresponding emergency transaction and spawn a thread
         to fetch emergency transactions signatures.
         """
-        while not self.poller_stop.wait(2):
+        while not self.poller_stop.wait(5.0):
             known_outputs = [v["txid"] for v in self.vaults]
-            # FIXME: This is a hack, better keeping track of known vault
-            # addresses.
-            # TODO: Check that there is no weird concurrency acces with the RPC
-            # proxy
             self.bitcoind_lock.acquire()
             vault_utxos = [utxo for utxo in self.bitcoind.listunspent()
-                           if not utxo["spendable"]]
+                           # FIXME: This is a hack, better keeping track of
+                           # known vault addresses.
+                           if not utxo["spendable"]
+                           and utxo["txid"] not in known_outputs]
             self.bitcoind_lock.release()
             for output in vault_utxos:
-                if output["txid"] not in known_outputs:
-                    self.vaults_lock.acquire()
-                    self.add_new_vault(output)
-                    self.vaults_lock.release()
+                self.vaults_lock.acquire()
+                self.add_new_vault(output)
+                self.vaults_lock.release()
+            # Ok we updated our owned outputs, restart the emergency
+            # transactions gathering with the updated vaults list
+            self.update_emer_stop.set()
+            if self.update_emer_thread is not None:
+                try:
+                    self.update_emer_thread.join()
+                except RuntimeError:
+                    # Already dead
+                    pass
+            self.update_emer_thread.start()
 
     def send_signature(self, txid, sig):
         """Send the signature {sig} for tx {txid} to the sig server."""
@@ -257,3 +273,62 @@ class Vault:
         if not r.status_code == 201:
             raise Exception("stakeholder #{}: Could not send sig '{}' for"
                             " txid {}.".format(stakeholder_id, sig, txid))
+
+    def get_signature(self, txid, stakeholder_id):
+        """Request a signature to the signature server.
+
+        :param txid: The txid of the transaction we're interested in.
+        :param stakeholder_id: Which stakeholder's sig do we need.
+
+        :return: The signature as bytes, or None if not found.
+        """
+        r = requests.get("{}/sig/{}/{}".format(self.sigserver_url, txid,
+                                               stakeholder_id))
+        if r.status_code == 200:
+            return bytes.fromhex(r.json()["sig"])
+        elif r.status_code == 404:
+            return None
+        else:
+            raise Exception("Requesting stakeholder #{}'s signature for tx "
+                            "{}, response {}".format(stakeholder_id, txid,
+                                                     r.text))
+
+    def update_emergency_signatures(self, vault):
+        """Don't stop polling the sig server until we have all the sigs.
+
+        :vault: The dictionary representing the vault we are fetching the
+                emergency signatures for.
+        """
+        # The signatures ordered like stk1, stk2, stk3, stk4
+        sigs = [None, None, None, None]
+        txid = b2x(vault["emergency_tx"].GetTxid())
+        while None in sigs and not self.update_emer_stop.wait(1):
+            for i in range(1, 4):
+                if sigs[i - 1] is None:
+                    sigs[i - 1] = self.get_signature(txid, i)
+        # Only populate the sigs if we got them all, not if master told us to
+        # stop.
+        if not self.update_emer_stop.wait(0.0):
+            # self.vaults_lock.acquire()
+            vault["emergency_tx"] = \
+                form_emergency_vault_tx(vault["emergency_tx"],
+                                        vault["pubkeys"], sigs)
+            vault["emergency_signed"] = True
+            # self.vaults_lock.release()
+
+    def update_all_emergency_signatures(self):
+        """Poll the server for the signatures of all vaults' emergency tx."""
+        threads = []
+        # Don't reserve the vaults lock for an indefinite amount of time
+        for vault in self.vaults:
+            if self.update_emer_stop.wait(0.0):
+                return
+            if not vault["emergency_signed"]:
+                t = threading.Thread(
+                    target=self.update_emergency_signatures, args=[vault])
+                t.start()
+                threads.append(t)
+        for t in threads:
+            if self.update_emer_stop.wait(0.0):
+                return
+            t.join()
