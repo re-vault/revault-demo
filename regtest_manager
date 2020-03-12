@@ -58,13 +58,15 @@ EOF
 
 	echo ""
 	echo "Started $n_nodes pairs of bitcoind and nodes with rpc user \"test\" and pass \"test\" (and poor alias names)."
+	sleep 0.4
 	echo "Now generating some coins.."
+	sleep 0.3
 
 	# Use the first node as the block generator
 	miner="bitcoin-cli -regtest -rpcpassword=test -rpcuser=test -rpcport=9001"
 	for n in $(seq 60);do
 		if [ "$n" = "1" ];then
-			while [ $($miner getblockchaininfo > /dev/null; echo $?) -ne 0 ];do
+			while [ $($miner getblockchaininfo &> /dev/null; echo $?) -ne 0 ];do
 				echo "Waiting for bitcoind to warmup.."
 				sleep 1
 			done
@@ -75,6 +77,21 @@ EOF
 			sleep 0.001
 		done
 		echo -en "\r$n/60 blocks generated"
+	done
+	echo "\n"
+
+	echo "We generate a fake load of transaction to populate fee estimation buckets"
+	for n in $(seq 4);do
+		for i in $(seq $n_nodes);do
+			bcli="bitcoin-cli -regtest -rpcpassword=test -rpcuser=test -rpcport=$((9000 + $i))"
+			for _ in $(seq 10);do
+				address="$bcli getnewaddress"
+				$bcli sendtoaddress $($bcli getnewaddress) 10 > /dev/null
+			done
+			$miner generatetoaddress 1 $($bcli getnewaddress) > /dev/null
+			sleep 0.001
+		done
+		echo -en "\r$n/4 rounds completed"
 	done
 
 	echo "We start generating blocks in the background."
