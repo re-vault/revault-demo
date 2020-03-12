@@ -4,7 +4,7 @@ import requests
 import threading
 
 from bip32 import BIP32
-from bitcoin.core import b2x, lx
+from bitcoin.core import b2x, lx, COIN
 from bitcoin.wallet import CBitcoinAddress
 from decimal import Decimal, getcontext
 from .transactions import (
@@ -169,7 +169,7 @@ class Vault:
                             .format(r.status_code, r.text))
         btc_perkvb = Decimal(r.json()["feerate"])
         # Explicit conversion to sat per virtual byte
-        return int(btc_perkvb * Decimal(10**8) / Decimal(1000))
+        return int(btc_perkvb * Decimal(COIN) / Decimal(1000))
 
     def guess_index(self, vault_address):
         """Guess the index used to derive the 4 pubkeys used in this 4of4.
@@ -192,7 +192,8 @@ class Vault:
             "txid": output["txid"],
             "vout": output["vout"],
             # This amount is in BTC, we want sats
-            "amount": int(Decimal(output["amount"]) / Decimal(10**8)),
+            "amount": int(Decimal(output["amount"]) * Decimal(COIN)),
+            "pubkeys": [],
             # For convenience
             "address": output["address"],
         }
