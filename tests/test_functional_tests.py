@@ -6,7 +6,7 @@ from bip32 import BIP32
 from bitcoin.core import b2x
 from bitcoin.wallet import CKey
 from fixtures import *  # noqa: F401,F403
-from utils import SIGSERV_URL
+from utils import SIGSERV_URL, wait_for
 from vaultaic import Vault
 
 
@@ -26,7 +26,6 @@ def get_random_vault(bitcoind_conf, our_seed=None, xpubs=None,
         others_bip32 = [BIP32.from_seed(os.urandom(32)) for i in range(3)]
         xpubs = [keychain.get_master_xpub() for keychain in others_bip32]
     # Are we one of the traders or a normie stakeholder ?
-    print(whoami)
     if whoami == 1:
         all_xpubs = [our_bip32.get_master_xpub()] + xpubs
     elif whoami == 2:
@@ -43,7 +42,6 @@ def get_random_vault(bitcoind_conf, our_seed=None, xpubs=None,
         sigserv_url = "http://{}".format(SIGSERV_URL)
     else:
         sigserv_url = SIGSERV_URL
-    print(all_xpubs)
     return Vault(our_xpriv, all_xpubs, serv_pubkey, emer_pubkeys,
                  bitcoind_conf, sigserv_url)
 
@@ -91,3 +89,23 @@ def test_signatures_posting(bitcoind):
     """Test that we can send signatures to the sig server."""
     vault = get_random_vault(bitcoind.rpc.__btc_conf_file__)
     vault.send_signature("00af", "aa56")
+
+
+@unittest.skipIf(SIGSERV_URL == "", "We want to test against a running Flask"
+                                    " instance, not test_client()")
+def test_funds_polling(bitcoind):
+    """Test that we are aware of the funds we receive."""
+    vault = get_random_vault(bitcoind.rpc.__btc_conf_file__)
+    assert len(vault.vaults) == 0
+    # Send new funds to it
+    for i in range(3):
+        txid = bitcoind.rpc.sendtoaddress(vault.getnewaddress(), 10)
+        bitcoind.generate_block(1, [txid])
+    wait_for(lambda: len(vault.vaults) == 3)
+    # Retry with a gap
+    for _ in range(20):
+        vault.getnewaddress()
+    for i in range(2):
+        txid = bitcoind.rpc.sendtoaddress(vault.getnewaddress(), 10)
+        bitcoind.generate_block(1, [txid])
+    wait_for(lambda: len(vault.vaults) == 3)
