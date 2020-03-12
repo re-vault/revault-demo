@@ -90,13 +90,6 @@ def bitcoind(directory):
         logging.debug("Insufficient balance, generating 1 block")
         bitcoind.generate_block(1)
 
-    # Simulate a fake load of transactions for estimatesmartfee
-    bitcoind.generate_block(20)
-    for block in range(5):
-        for tx in range(30):
-            bitcoind.rpc.sendtoaddress(bitcoind.getnewaddress(), 1)
-        bitcoind.generate_block()
-
     yield bitcoind
 
     try:

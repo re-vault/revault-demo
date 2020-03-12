@@ -78,9 +78,18 @@ def test_sigserver(bitcoind, sigserv):
     r = sigserv.get("sig/{}/{}".format(txid, stk_id))
     assert r.status_code == 200
     assert r.json == {"sig": sig}
+
+
+@unittest.skipIf(SIGSERV_URL == "", "We want to test against a running Flask"
+                                    " instance, not test_client()")
+def test_sigserver_feerate(bitcoind):
+    """We just test that it gives us a (valid) feerate."""
+    # FIXME: Test that it sends the same feerate with same txid
+    vault = get_random_vault(bitcoind.rpc.__btc_conf_file__)
     # GET emergency feerate
-    r = sigserv.get("emergency_feerate/{}".format(txid))
-    assert r.status_code == 200
+    feerate = vault.get_emergency_feerate("high_entropy")
+    # sats/vbyte, if it's less there's something going on !
+    assert feerate >= 1
 
 
 @unittest.skipIf(SIGSERV_URL == "", "We want to test against a running Flask"
