@@ -13,13 +13,13 @@ from bitcoin.core.script import (
 from bitcoin.wallet import CBitcoinAddress, CKey
 from decimal import Decimal, getcontext
 from fixtures import *  # noqa: F401,F403
-from vaultaic.transactions import (
+from revault.transactions import (
     vault_txout, vault_script, unvault_txout, unvault_script,
     create_and_sign_unvault_tx, form_unvault_tx,
     create_and_sign_emergency_vault_tx, form_emergency_vault_tx,
     cancel_unvault_tx, emergency_unvault_tx, sign_spend_tx, create_spend_tx,
 )
-from vaultaic.utils import empty_signature
+from revault.utils import empty_signature
 
 
 bitcoin.SelectParams("regtest")

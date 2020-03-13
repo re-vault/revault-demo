@@ -1,5 +1,5 @@
 from setuptools import setup, find_packages
-import vaultaic
+import revault
 import io
 
 
@@ -9,8 +9,8 @@ with io.open("README.md", encoding="utf-8") as f:
 with io.open("requirements.txt", encoding="utf-8") as f:
     requirements = [r for r in f.read().split('\n') if len(r)]
 
-setup(name="vaultaic",
-      version=vaultaic.__version__,
+setup(name="revault",
+      version=revault.__version__,
       description="",
       long_description=long_description,
       long_description_content_type="text/markdown",
@@ -20,5 +20,5 @@ setup(name="vaultaic",
       license="MIT",
       packages=find_packages(),
       keywords=["bitcoin", "vault"],
-      #install_requires=requirements
+      install_requires=requirements
       )

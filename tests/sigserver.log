@@ -1,0 +1,26 @@
+nohup: ignoring input
+ * Serving Flask app "revault.sigserver" (lazy loading)
+ * Environment: production
+   WARNING: This is a development server. Do not use it in a production deployment.
+   Use a production WSGI server instead.
+ * Debug mode: on
+ * Running on http://127.0.0.1:5000/ (Press CTRL+C to quit)
+ * Restarting with stat
+ * Debugger is active!
+ * Debugger PIN: 107-551-058
+ * Detected change in '/home/darosior/leonod/revault/venv/lib/python3.7/site-packages/revault-0.0.1-py3.7.egg', reloading
+ * Restarting with stat
+ * Debugger is active!
+ * Debugger PIN: 107-551-058
+ * Detected change in '/home/darosior/leonod/revault/venv/lib/python3.7/site-packages/revault-0.0.1-py3.7.egg', reloading
+ * Restarting with stat
+ * Debugger is active!
+ * Debugger PIN: 107-551-058
+127.0.0.1 - - [13/Mar/2020 11:04:53] "[37mPOST /sig/00af/1 HTTP/1.1[0m" 201 -
+127.0.0.1 - - [13/Mar/2020 11:04:53] "[37mGET /emergency_feerate/high_entropy HTTP/1.1[0m" 200 -
+127.0.0.1 - - [13/Mar/2020 11:04:58] "[37mGET /emergency_feerate/3248475c0a9b4e7d5222661dc9c647852e163cab25f45a0ad797e7da147a2c1e HTTP/1.1[0m" 200 -
+127.0.0.1 - - [13/Mar/2020 11:04:58] "[37mPOST /sig/45f8f01642613ebe3bdd23547169af9d6ccbc3aa527b435893a1e9c53c807fb5/1 HTTP/1.1[0m" 201 -
+127.0.0.1 - - [13/Mar/2020 11:04:58] "[37mGET /emergency_feerate/64633c198aa05191d1d4811723d597b4a98b20f5291545982745db2b6747096f HTTP/1.1[0m" 200 -
+127.0.0.1 - - [13/Mar/2020 11:04:58] "[37mPOST /sig/53e1e2e9084fd4017a450818b45b2e92c053561c1ffc8611309a36d98e49e04f/1 HTTP/1.1[0m" 201 -
+127.0.0.1 - - [13/Mar/2020 11:04:58] "[37mGET /emergency_feerate/d6fd2d17f239ae5cb8deecaf977f6df469417eb831b2fa1edd169ef4aa11cbf6 HTTP/1.1[0m" 200 -
+127.0.0.1 - - [13/Mar/2020 11:04:58] "[37mPOST /sig/d12eb95008feff6843b98ed276fe5095d2d6d7a409081485c0121679c22bd2e0/1 HTTP/1.1[0m" 201 -

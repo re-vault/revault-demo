@@ -133,7 +133,7 @@ class Vault:
         addr = str(CBitcoinAddress.from_scriptPubKey(txo.scriptPubKey))
         self.bitcoind_lock.acquire()
         # FIXME: Optimise this...
-        self.bitcoind.importaddress(addr, "vaultaic", True)
+        self.bitcoind.importaddress(addr, "revault", True)
         self.bitcoind_lock.release()
 
     def update_watched_addresses(self):

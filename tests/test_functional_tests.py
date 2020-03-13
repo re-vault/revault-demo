@@ -7,7 +7,7 @@ from bitcoin.core import b2x
 from bitcoin.wallet import CKey
 from fixtures import *  # noqa: F401,F403
 from utils import SIGSERV_URL, wait_for
-from vaultaic import Vault
+from revault import Vault
 
 
 bitcoin.SelectParams("regtest")

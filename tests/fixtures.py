@@ -4,7 +4,7 @@ Rusty Russell or Christian Decker who wrote most of this (I'd put some sats on
 cdecker), so credits to them ! (MIT licensed)
 """
 from utils import BitcoinD
-from vaultaic import SigServer
+from revault import SigServer
 
 import logging
 import os

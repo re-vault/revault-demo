@@ -1,4 +1,4 @@
-# vaultaic
+# revault
 
 Vaultaic is an Open Source (WIP) demo implementation of a multiparty vault
 architecture designed by [Chainsmiths](http://chainsmiths.com) for the needs of
@@ -7,11 +7,11 @@ architecture designed by [Chainsmiths](http://chainsmiths.com) for the needs of
 ## Running the tests
 
 ```
-# Install the vaultaic dependencies
+# Install the revault dependencies
 python3 -m venv venv
 . venv/bin/activate
 pip install -r requirements.txt
-# Install vaultaic
+# Install revault
 python3 setup.py install
 # Install the tests dependencies
 pip install -r tests/requirements.txt

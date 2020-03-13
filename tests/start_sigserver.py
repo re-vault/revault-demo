@@ -1,5 +1,5 @@
 import os
-import vaultaic
+import revault
 import sys
 
 
@@ -15,6 +15,6 @@ if __name__ == "__main__":
         sys.exit(1)
 
     conf_path = os.path.abspath(sys.argv[1])
-    sigserver = vaultaic.SigServer(bitcoind_conf_path=conf_path)
+    sigserver = revault.SigServer(bitcoind_conf_path=conf_path)
     host, port = sys.argv[2].split(':') if len(sys.argv) > 2 else (None, None)
     sigserver.run(host=host, port=port, debug=True)
