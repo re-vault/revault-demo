@@ -6,15 +6,11 @@ from bitcoin.core import (
 )
 from bitcoin.core.script import (
     CScript, OP_CHECKSIG, OP_CHECKSIGVERIFY, OP_CHECKMULTISIG, OP_SWAP, OP_ADD,
-    OP_DUP, OP_EQUAL, OP_EQUALVERIFY, OP_NOP3, OP_IF, OP_ELSE, OP_ENDIF, OP_0,
-    OP_2, OP_3, OP_4, OP_6, SignatureHash, SIGHASH_ALL, SIGVERSION_WITNESS_V0,
-    CScriptWitness
+    OP_DUP, OP_EQUAL, OP_EQUALVERIFY, OP_CHECKSEQUENCEVERIFY, OP_IF, OP_ELSE,
+    OP_ENDIF, OP_0, OP_2, OP_3, OP_4, OP_6, SignatureHash, SIGHASH_ALL,
+    SIGVERSION_WITNESS_V0, CScriptWitness
 )
 from bitcoin.wallet import CKey, CBitcoinAddress
-
-
-# FIXME: Make Peter Todd accept Kanzure's PRs :(
-OP_CHECKSEQUENCEVERIFY = OP_NOP3
 
 
 def vault_script(pubkeys):
@@ -43,8 +39,8 @@ def vault_txout(pubkeys, value):
 def unvault_script(pub_trader1, pub_trader2, pub1, pub2, pub_server):
     return CScript([pub_trader1, OP_CHECKSIG, OP_SWAP, pub_trader2,
                     OP_CHECKSIG, OP_ADD, OP_SWAP, pub1, OP_CHECKSIG, OP_ADD,
-                    OP_DUP, OP_3, OP_EQUAL, OP_IF, OP_SWAP, pub2,
-                    OP_CHECKSIGVERIFY, OP_ELSE, OP_2, OP_EQUALVERIFY,
+                    OP_DUP, OP_3, OP_EQUAL, OP_IF, OP_SWAP,
+                    pub2, OP_CHECKSIGVERIFY, OP_ELSE, OP_2, OP_EQUALVERIFY,
                     pub_server, OP_CHECKSIGVERIFY, OP_6,
                     OP_CHECKSEQUENCEVERIFY, OP_ENDIF])
 
