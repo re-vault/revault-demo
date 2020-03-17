@@ -95,12 +95,8 @@ class Vault:
     def __del__(self):
         # Stop the thread polling bitcoind
         self.poller_stop.set()
-        if self.poller is not None:
-            self.poller.join()
-        # Stop the RPC connection to bitcoind
-        self.bitcoind_lock.acquire()
+        self.poller.join()
         self.bitcoind.close()
-        self.bitcoind_lock.release()
         # Stop the thread updating emergency transactions
         self.update_emer_stop.set()
         if self.update_emer_thread is not None:
@@ -258,6 +254,11 @@ class Vault:
                 except RuntimeError:
                     # Already dead
                     pass
+            self.update_emer_stop.clear()
+            # You cant just restart threads in Python :-(
+            del self.update_emer_thread
+            self.update_emer_thread = \
+                threading.Thread(target=self.update_all_emergency_signatures)
             self.update_emer_thread.start()
 
     def send_signature(self, txid, sig):
@@ -305,15 +306,15 @@ class Vault:
         txid = b2x(vault["emergency_tx"].GetTxid())
         while None in vault["emergency_sigs"] and \
                 not self.update_emer_stop.wait(4.0):
-            for i in range(1, 4):
-                sigs = vault["emergency_sigs"][i - 1]
-                if sigs is None:
+            for i in range(1, 5):
+                if vault["emergency_sigs"][i - 1] is None:
                     self.vaults_lock.acquire()
-                    sigs = self.get_signature(txid, i)
+                    vault["emergency_sigs"][i - 1] = \
+                        self.get_signature(txid, i)
                     self.vaults_lock.release()
         # Only populate the sigs if we got them all, not if master told us to
         # stop.
-        if len(vault["emergency_sigs"]) == 4:
+        if None not in vault["emergency_sigs"]:
             self.vaults_lock.acquire()
             vault["emergency_tx"] = \
                 form_emergency_vault_tx(vault["emergency_tx"],
@@ -325,17 +326,14 @@ class Vault:
 
     def update_all_emergency_signatures(self):
         """Poll the server for the signatures of all vaults' emergency tx."""
+        if self.update_emer_stop.wait(0.0):
+            return
         threads = []
-        # Don't reserve the vaults lock for an indefinite amount of time
         for vault in self.vaults:
-            if self.update_emer_stop.wait(0.0):
-                return
             if not vault["emergency_signed"]:
                 t = threading.Thread(
                     target=self.update_emergency_signatures, args=[vault])
                 t.start()
                 threads.append(t)
-        for t in threads:
-            if self.update_emer_stop.wait(0.0):
-                return
-            t.join()
+        while len(threads) > 0:
+            threads.pop().join()
