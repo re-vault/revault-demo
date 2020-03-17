@@ -9,14 +9,18 @@ fi
 n_nodes=2
 
 # Generates blocks not too quickly and keep everyone in sync
-generate_regtest () {
+generate_fake_load_regtest () {
 	while true;do
-		for i in $(seq $n_nodes);do
-			bcli="bitcoin-cli -regtest -rpcpassword=test -rpcuser=test -rpcport=$((9000 + $i))"
-			if [ $($bcli generatetoaddress 1 $($bcli getnewaddress) &> /dev/null; echo $?) -ne 0 ];then
-				return
-			fi
-			sleep 0.1
+		for n in $(seq 4);do
+			for i in $(seq $n_nodes);do
+				bcli="bitcoin-cli -regtest -rpcpassword=test -rpcuser=test -rpcport=$((9000 + $i))"
+				for _ in $(seq 10);do
+					address="$bcli getnewaddress"
+					$bcli sendtoaddress $($bcli getnewaddress) 10 > /dev/null
+				done
+				$miner generatetoaddress 1 $($bcli getnewaddress) > /dev/null
+				sleep 0.001
+			done
 		done
 		sleep 20
 	done
@@ -95,8 +99,8 @@ EOF
 	done
 	echo ""
 
-	echo "We start generating blocks in the background."
-	generate_regtest &
+	echo "We continue fake load in the background."
+	generate_fake_load_regtest &
 }
 
 soft_stop_regtest () {
