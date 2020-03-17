@@ -1,5 +1,6 @@
 import bitcoin
 import os
+import random
 import unittest
 
 from bip32 import BIP32
@@ -117,4 +118,69 @@ def test_funds_polling(bitcoind):
     for i in range(2):
         txid = bitcoind.rpc.sendtoaddress(vault.getnewaddress(), 10)
         bitcoind.generate_block(1, [txid])
-    wait_for(lambda: len(vault.vaults) == 3)
+    wait_for(lambda: len(vault.vaults) == 5)
+
+
+@unittest.skipIf(SIGSERV_URL == "", "We want to test against a running Flask"
+                                    " instance, not test_client()")
+def test_emergency_sending(bitcoind):
+    """Test that we share the emergency transaction signature."""
+    vault = get_random_vault(bitcoind.rpc.__btc_conf_file__)
+    assert len(vault.vaults) == 0
+    # Send new funds to it
+    txid = bitcoind.rpc.sendtoaddress(vault.getnewaddress(), 10)
+    bitcoind.generate_block(1, [txid])
+    wait_for(lambda: len(vault.vaults) == 1)
+    # We send then request it, hence if we succesfully requested it, we
+    # succesfully delivered it to the sig server
+    wait_for(lambda: len(vault.vaults[0]["emergency_sigs"]) > 0)
+
+
+@unittest.skipIf(SIGSERV_URL == "", "We want to test against a running Flask"
+                                    " instance, not test_client()")
+def test_emergency_tx_sync(vault_factory):
+    """Test that we correctly share and gather emergency transactions
+    signatures."""
+    vaults = vault_factory.get_vaults()
+    # FIXME: separate the Bitcoin backends !!
+    bitcoind = vaults[0].bitcoind
+    # Sending funds to any vault address will be remarked by anyone
+    for vault in vaults:
+        txid = bitcoind.sendtoaddress(vault.getnewaddress(), 10)
+        wait_for(lambda: txid in bitcoind.getrawmempool())
+        bitcoind.generatetoaddress(1, bitcoind.getnewaddress())
+    for vault in vaults:
+        wait_for(lambda: len(vault.vaults) == len(vaults))
+        # FIXME: too much "vault" vars
+        wait_for(lambda: all(v["emergency_signed"] for v in vault.vaults))
+    # All nodes should have the same emergency transactions
+    for i in range(len(vaults) - 1):
+        print(vaults[i].vaults, vaults[i + 1].vaults)
+        first_emer_txs = [v["emergency_tx"] for v in vaults[i].vaults]
+        second_emer_txs = [v["emergency_tx"] for v in vaults[i + 1].vaults]
+        for tx in first_emer_txs:
+            assert tx == second_emer_txs[first_emer_txs.index(tx)]
+
+
+@unittest.skipIf(SIGSERV_URL == "", "We want to test against a running Flask"
+                                    " instance, not test_client()")
+def test_emergency_broadcast(vault_factory):
+    """Test that all the emergency transactions we create are valid and can be
+    broadcast."""
+    vaults = vault_factory.get_vaults()
+    # FIXME: separate the Bitcoin backends !!
+    bitcoind = vaults[0].bitcoind
+    # Sending funds to any vault address will be remarked by anyone
+    for vault in vaults:
+        for _ in range(2):
+            txid = bitcoind.sendtoaddress(vault.getnewaddress(), 10)
+            wait_for(lambda: txid in bitcoind.getrawmempool())
+            bitcoind.generatetoaddress(1, bitcoind.getnewaddress())
+    wait_for(lambda: all(v["emergency_signed"] for v in vault.vaults))
+    vault = random.choice(vaults)
+    for tx in [v["emergency_tx"] for v in vault.vaults]:
+        txid = bitcoind.sendrawtransaction(b2x(tx.serialize()))
+        wait_for(lambda: txid in bitcoind.getrawmempool())
+        bitcoind.generatetoaddress(1, bitcoind.getnewaddress())
+
+    # FIXME: test address reuse
