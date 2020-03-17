@@ -3,7 +3,7 @@ Most of the code here is stolen from C-lightning's test suite. This is surely
 Rusty Russell or Christian Decker who wrote most of this (I'd put some sats on
 cdecker), so credits to them ! (MIT licensed)
 """
-from utils import BitcoinD
+from utils import BitcoinD, BitcoinFactory
 from revault import SigServer
 
 import logging
@@ -67,36 +67,20 @@ def test_name(request):
 @pytest.fixture
 def bitcoind(directory):
     bitcoind = BitcoinD(bitcoin_dir=directory)
-
-    try:
-        bitcoind.start()
-    except Exception:
-        bitcoind.stop()
-        raise
-
-    info = bitcoind.rpc.getnetworkinfo()
-
-    if info['version'] < 160000:
-        bitcoind.rpc.stop()
-        raise ValueError("bitcoind is too old. At least version 16000"
-                         " (v0.16.0) is needed, current version is {}"
-                         .format(info['version']))
-
-    info = bitcoind.rpc.getblockchaininfo()
-    # Make sure we have some spendable funds
-    if info['blocks'] < 101:
-        bitcoind.generate_block(101 - info['blocks'])
-    elif bitcoind.rpc.getwalletinfo()['balance'] < 1:
-        logging.debug("Insufficient balance, generating 1 block")
-        bitcoind.generate_block(1)
+    bitcoind.startup()
 
     yield bitcoind
 
-    try:
-        bitcoind.stop()
-    except Exception:
-        bitcoind.proc.kill()
-    bitcoind.proc.wait()
+    bitcoind.cleanup()
+
+
+@pytest.fixture
+def bitcoind_factory(directory):
+    facto = BitcoinFactory(directory)
+
+    yield facto
+
+    facto.cleanup_all()
 
 
 @pytest.fixture

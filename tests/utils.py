@@ -370,3 +370,52 @@ class BitcoinD(TailableProc):
         if address in [utxo["address"] for utxo in self.rpc.listunspent()]:
             return True
         return False
+
+    def startup(self):
+        try:
+            self.start()
+        except Exception:
+            self.stop()
+            raise
+
+        info = self.rpc.getnetworkinfo()
+
+        if info['version'] < 160000:
+            self.rpc.stop()
+            raise ValueError("bitcoind is too old. At least version 16000"
+                             " (v0.16.0) is needed, current version is {}"
+                             .format(info['version']))
+
+        info = self.rpc.getblockchaininfo()
+        # Make sure we have some spendable funds
+        if info['blocks'] < 101:
+            self.generate_block(101 - info['blocks'])
+        elif self.rpc.getwalletinfo()['balance'] < 1:
+            logging.debug("Insufficient balance, generating 1 block")
+            self.generate_block(1)
+
+    def cleanup(self):
+        try:
+            self.stop()
+        except Exception:
+            self.proc.kill()
+        self.proc.wait()
+
+
+class BitcoinFactory:
+    def __init__(self, directory):
+        """Spin up some bitcoind nodes."""
+        self.directory = directory
+        self.nodes = []
+
+    def get_nodes(self, num=1):
+        for i in range(num):
+            bitcoin_dir = os.path.join(self.directory, "bitcoind-{}".format(i))
+            bitcoind = BitcoinD(bitcoin_dir=bitcoin_dir)
+            bitcoind.startup()
+            self.nodes.append(bitcoind)
+        return self.nodes
+
+    def cleanup_all(self):
+        for n in self.nodes:
+            n.cleanup()
