@@ -3,7 +3,7 @@ Most of the code here is stolen from C-lightning's test suite. This is surely
 Rusty Russell or Christian Decker who wrote most of this (I'd put some sats on
 cdecker), so credits to them ! (MIT licensed)
 """
-from utils import BitcoinD, BitcoinFactory
+from utils import BitcoinD, BitcoinFactory, VaultFactory
 from revault import SigServer
 
 import logging
@@ -52,11 +52,14 @@ def directory(request, test_base_dir, test_name):
     outcome = 'passed' if rep_call is None else rep_call.outcome
     failed = not outcome or request.node.has_errors or outcome != 'passed'
 
+    # FIXME
+    """
     if not failed:
         shutil.rmtree(directory)
     else:
         logging.debug("Test execution failed, leaving the test directory {}"
                       " intact.".format(directory))
+    """
 
 
 @pytest.fixture
@@ -81,6 +84,17 @@ def bitcoind_factory(directory):
     yield facto
 
     facto.cleanup_all()
+
+
+@pytest.fixture
+def vault_factory(bitcoind):
+    vault_factory = VaultFactory(bitcoind)
+
+    yield vault_factory
+
+    for vault in vault_factory.vaults:
+        del vault
+    bitcoind.cleanup()
 
 
 @pytest.fixture

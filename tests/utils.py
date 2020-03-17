@@ -3,8 +3,11 @@ Most of the code here is stolen from C-lightning's test suite. This is surely
 Rusty Russell or Christian Decker who wrote most of this (I'd put some sats on
 cdecker), so credits to them ! (MIT licensed)
 """
+from bip32 import BIP32
 from bitcoin.rpc import RawProxy as BitcoinProxy
+from bitcoin.wallet import CKey
 from ephemeral_port_reserve import reserve
+from revault import Vault
 
 import logging
 import os
@@ -419,3 +422,28 @@ class BitcoinFactory:
     def cleanup_all(self):
         for n in self.nodes:
             n.cleanup()
+
+
+class VaultFactory:
+    def __init__(self, bitcoind):
+        """Spin up some already connected vaults."""
+        # FIXME: use a bitcoind for each !!
+        self.bitcoind = bitcoind
+        self.vaults = []
+
+    def get_vaults(self, server_privkey=None, emergency_privkeys=None):
+        """Get 4 vaults, one for each stakeholder."""
+        bip32s = [BIP32.from_seed(os.urandom(32)) for _ in range(4)]
+        xpubs = [bip32.get_master_xpub() for bip32 in bip32s]
+        if server_privkey is None:
+            server_privkey = CKey(os.urandom(32))
+        if emergency_privkeys is None:
+            emergency_privkeys = [CKey(os.urandom(32)) for _ in range(4)]
+        emergency_pubkeys = [k.pub for k in emergency_privkeys]
+        self.vaults = []
+        for bip32 in bip32s:
+            xpriv = bip32.get_master_xpriv()
+            conf = self.bitcoind.rpc.__btc_conf_file__
+            self.vaults.append(Vault(xpriv, xpubs, server_privkey.pub,
+                                     emergency_pubkeys, conf, SIGSERV_URL))
+        return self.vaults
