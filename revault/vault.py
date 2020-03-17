@@ -201,6 +201,8 @@ class Vault:
             # For convenience
             "address": output["address"],
             "emergency_tx": None,
+            # Avoid asking them multiple times
+            "emergency_sigs": [None, None, None, None],
             "emergency_signed": False,
             "unvaul_tx": None,
             "unvault_emergency_tx": None,
@@ -300,21 +302,26 @@ class Vault:
                 emergency signatures for.
         """
         # The signatures ordered like stk1, stk2, stk3, stk4
-        sigs = [None, None, None, None]
         txid = b2x(vault["emergency_tx"].GetTxid())
-        while None in sigs and not self.update_emer_stop.wait(1):
+        while None in vault["emergency_sigs"] and \
+                not self.update_emer_stop.wait(4.0):
             for i in range(1, 4):
-                if sigs[i - 1] is None:
-                    sigs[i - 1] = self.get_signature(txid, i)
+                sigs = vault["emergency_sigs"][i - 1]
+                if sigs is None:
+                    self.vaults_lock.acquire()
+                    sigs = self.get_signature(txid, i)
+                    self.vaults_lock.release()
         # Only populate the sigs if we got them all, not if master told us to
         # stop.
-        if not self.update_emer_stop.wait(0.0):
-            # self.vaults_lock.acquire()
+        if len(vault["emergency_sigs"]) == 4:
+            self.vaults_lock.acquire()
             vault["emergency_tx"] = \
                 form_emergency_vault_tx(vault["emergency_tx"],
-                                        vault["pubkeys"], sigs)
+                                        vault["pubkeys"],
+                                        vault["emergency_sigs"])
             vault["emergency_signed"] = True
-            # self.vaults_lock.release()
+            # FIXME: is deleting sigs from the struct here over optimization ?
+            self.vaults_lock.release()
 
     def update_all_emergency_signatures(self):
         """Poll the server for the signatures of all vaults' emergency tx."""
