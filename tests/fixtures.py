@@ -19,7 +19,7 @@ __attempts = {}
 def test_base_dir():
     d = os.getenv("TEST_DIR", "/tmp")
 
-    directory = tempfile.mkdtemp(prefix='ltests-', dir=d)
+    directory = tempfile.mkdtemp(prefix='revault-tests-', dir=d)
     print("Running tests in {}".format(directory))
 
     yield directory
