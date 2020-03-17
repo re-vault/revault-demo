@@ -405,25 +405,6 @@ class BitcoinD(TailableProc):
         self.proc.wait()
 
 
-class BitcoinFactory:
-    def __init__(self, directory):
-        """Spin up some bitcoind nodes."""
-        self.directory = directory
-        self.nodes = []
-
-    def get_nodes(self, num=1):
-        for i in range(num):
-            bitcoin_dir = os.path.join(self.directory, "bitcoind-{}".format(i))
-            bitcoind = BitcoinD(bitcoin_dir=bitcoin_dir)
-            bitcoind.startup()
-            self.nodes.append(bitcoind)
-        return self.nodes
-
-    def cleanup_all(self):
-        for n in self.nodes:
-            n.cleanup()
-
-
 class VaultFactory:
     def __init__(self, bitcoind):
         """Spin up some already connected vaults."""

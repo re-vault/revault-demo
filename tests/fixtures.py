@@ -3,7 +3,7 @@ Most of the code here is stolen from C-lightning's test suite. This is surely
 Rusty Russell or Christian Decker who wrote most of this (I'd put some sats on
 cdecker), so credits to them ! (MIT licensed)
 """
-from utils import BitcoinD, BitcoinFactory, VaultFactory
+from utils import BitcoinD, VaultFactory
 from revault import SigServer
 
 import logging
@@ -75,15 +75,6 @@ def bitcoind(directory):
     yield bitcoind
 
     bitcoind.cleanup()
-
-
-@pytest.fixture
-def bitcoind_factory(directory):
-    facto = BitcoinFactory(directory)
-
-    yield facto
-
-    facto.cleanup_all()
 
 
 @pytest.fixture
