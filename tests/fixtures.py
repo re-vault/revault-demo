@@ -84,7 +84,7 @@ def vault_factory(bitcoind):
     yield vault_factory
 
     for vault in vault_factory.vaults:
-        del vault
+        vault.stop()
     bitcoind.cleanup()
 
 

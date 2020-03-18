@@ -77,6 +77,7 @@ class Vault:
         #   "unvault_emergency_tx": CTransaction or None,
         # }
         # The amount is in satoshis.
+        # FIXME: should we drop spent vaults ?
         self.vaults = []
         self.vaults_lock = threading.Lock()
 
@@ -92,7 +93,13 @@ class Vault:
         self.update_emer_thread =\
             threading.Thread(target=self.update_all_emergency_signatures)
 
+        self.stopped = False
+
     def __del__(self):
+        if not self.stopped:
+            self.stop()
+
+    def stop(self):
         # Stop the thread polling bitcoind
         self.poller_stop.set()
         self.poller.join()
@@ -105,6 +112,7 @@ class Vault:
             except RuntimeError:
                 # Already dead
                 pass
+        self.stopped = True
 
     def get_pubkeys(self, index):
         """Get all the pubkeys for this {index}.
