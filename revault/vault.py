@@ -62,6 +62,7 @@ class Vault:
         self.sigserver_url = sigserver_url
         if self.sigserver_url.endswith('/'):
             self.sigserver_url = self.sigserver_url[:-1]
+        self.watched_addresses = []
         self.update_watched_addresses()
 
         # We keep track of each vault, represented as
@@ -135,6 +136,7 @@ class Vault:
         :param txo: The output to watch, a CTxOutput.
         """
         addr = str(CBitcoinAddress.from_scriptPubKey(txo.scriptPubKey))
+        self.watched_addresses.append(addr)
         self.bitcoind_lock.acquire()
         # FIXME: Optimise this...
         self.bitcoind.importaddress(addr, "revault", True)
@@ -244,9 +246,7 @@ class Vault:
             known_outputs = [v["txid"] for v in self.vaults]
             self.bitcoind_lock.acquire()
             vault_utxos = [utxo for utxo in self.bitcoind.listunspent()
-                           # FIXME: This is a hack, better keeping track of
-                           # known vault addresses.
-                           if not utxo["spendable"]
+                           if utxo["address"] in self.watched_addresses
                            and utxo["txid"] not in known_outputs]
             self.bitcoind_lock.release()
             for output in vault_utxos:
