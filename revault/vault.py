@@ -53,9 +53,13 @@ class Vault:
         self.all_xpubs = xpubs
         self.server_pubkey = server_pubkey
         self.emergency_pubkeys = emergency_pubkeys
+        # Ok, shitload of indexes. The current one is the lower bound of the
+        # range we will import to bitcoind as watchonly. The max one is the
+        # upper bond, the current "gen" one is to generate new addresses.
         self.current_index = current_index
-        # FIXME: Use the sig server to adjust the gap limit
+        self.current_gen_index = self.current_index
         self.max_index = current_index + 500
+        self.index_treshold = self.max_index
         # Needs to be acquired to access any of the above
         self.keys_lock = threading.Lock()
 
@@ -64,6 +68,9 @@ class Vault:
         self.bitcoind = bitcoin.rpc.RawProxy(btc_conf_file=bitcoin_conf_path)
         # Needs to be acquired to send RPC commands
         self.bitcoind_lock = threading.Lock()
+
+        # First of all, watch the emergency vault (not thread yet)
+        self.bitcoind
 
         # No lock we don't ever modify it
         self.sigserver_url = sigserver_url
@@ -174,11 +181,12 @@ class Vault:
 
         :return: (str) The next vault address.
         """
-        addr = self.get_vault_address(self.current_index)
-        # Bump afterwards..
-        self.current_index += 1
-        self.max_index += 1
-        self.update_watched_addresses()
+        addr = self.get_vault_address(self.current_gen_index)
+        # FIXME: This is too simplistic
+        self.current_gen_index += 1
+        # Mind the gap ! https://www.youtube.com/watch?v=UOPyGKDQuRk
+        if self.current_gen_index > self.index_treshold - 20:
+            self.update_watched_addresses()
         return addr
 
     def get_emergency_feerate(self, txid):
@@ -268,6 +276,13 @@ class Vault:
                 self.vaults_lock.acquire()
                 self.add_new_vault(output)
                 self.vaults_lock.release()
+                # Do a new bunch of watchonly imports if we get closer to the
+                # maximum index we originally derived.
+                # FIXME: This doesn't take address reuse into account
+                self.current_index += 1
+                self.max_index += 1
+                if self.current_index > self.index_treshold - 20:
+                    self.update_watched_addresses()
             # Ok we updated our owned outputs, restart the emergency
             # transactions gathering with the updated vaults list
             self.update_emer_stop.set()
