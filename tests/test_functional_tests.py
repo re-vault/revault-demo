@@ -183,4 +183,36 @@ def test_emergency_broadcast(vault_factory):
         wait_for(lambda: txid in bitcoind.getrawmempool())
         bitcoind.generatetoaddress(1, bitcoind.getnewaddress())
 
-    # FIXME: test address reuse
+
+@unittest.skipIf(SIGSERV_URL == "", "We want to test against a running Flask"
+                                    " instance, not test_client()")
+def test_vault_address_reuse(vault_factory):
+    """Test that we are still safe if coins are sent to an already used vault.
+    """
+    vaults = vault_factory.get_vaults()
+    # FIXME: separate the Bitcoin backends !!
+    bitcoind = vaults[0].bitcoind
+    vault = random.choice(vaults)
+    address = vault.getnewaddress()
+    # First send
+    txid = bitcoind.sendtoaddress(address, 10)
+    wait_for(lambda: txid in bitcoind.getrawmempool())
+    bitcoind.generatetoaddress(1, bitcoind.getnewaddress())
+    wait_for(lambda: len(vault.vaults) == 1)
+    wait_for(lambda: vault.vaults[0]["emergency_signed"])
+    # Broadcast the emergency transaction, nothing left in the vault
+    tx = vault.vaults[0]["emergency_tx"]
+    txid = bitcoind.sendrawtransaction(b2x(tx.serialize()))
+    wait_for(lambda: txid in bitcoind.getrawmempool())
+    bitcoind.generatetoaddress(1, bitcoind.getnewaddress())
+    # Second send
+    txid = bitcoind.sendtoaddress(address, 12)
+    wait_for(lambda: txid in bitcoind.getrawmempool())
+    bitcoind.generatetoaddress(1, bitcoind.getnewaddress())
+    wait_for(lambda: len(vault.vaults) == 2)
+    wait_for(lambda: vault.vaults[1]["emergency_signed"])
+    # We should still be able to broadcast the emergency tx !
+    tx = vault.vaults[1]["emergency_tx"]
+    txid = bitcoind.sendrawtransaction(b2x(tx.serialize()))
+    wait_for(lambda: txid in bitcoind.getrawmempool())
+    bitcoind.generatetoaddress(1, bitcoind.getnewaddress())
