@@ -414,7 +414,7 @@ class VaultFactory:
 
     def get_vaults(self, server_privkey=None, emergency_privkeys=None):
         """Get 4 vaults, one for each stakeholder."""
-        bip32s = [BIP32.from_seed(os.urandom(32)) for _ in range(4)]
+        bip32s = [BIP32.from_seed(os.urandom(32), "test") for _ in range(4)]
         xpubs = [bip32.get_master_xpub() for bip32 in bip32s]
         if server_privkey is None:
             server_privkey = CKey(os.urandom(32))

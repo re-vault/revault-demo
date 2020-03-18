@@ -8,8 +8,8 @@ from bitcoin.core import b2x, lx, COIN
 from bitcoin.wallet import CBitcoinAddress
 from decimal import Decimal, getcontext
 from .transactions import (
-    vault_txout, create_and_sign_emergency_vault_tx, form_emergency_vault_tx,
-    get_transaction_size,
+    vault_txout, emergency_txout, create_and_sign_emergency_vault_tx,
+    form_emergency_vault_tx, get_transaction_size,
 )
 
 
@@ -69,8 +69,12 @@ class Vault:
         # Needs to be acquired to send RPC commands
         self.bitcoind_lock = threading.Lock()
 
-        # First of all, watch the emergency vault (not thread yet)
-        self.bitcoind
+        # First of all, watch the emergency vault
+        self.watch_emergency_vault()
+        # And store the corresponding address..
+        txo = emergency_txout(self.emergency_pubkeys, 0)
+        self.emergency_address = str(CBitcoinAddress
+                                     .from_scriptPubKey(txo.scriptPubKey))
 
         # No lock we don't ever modify it
         self.sigserver_url = sigserver_url
@@ -144,6 +148,23 @@ class Vault:
         self.keys_lock.release()
         return pubkeys
 
+    def watch_emergency_vault(self):
+        """There is only one emergency script"""
+        pubkeys = [b2x(pub) for pub in self.emergency_pubkeys]
+        desc = "wsh(multi(4,{},{},{},{}))".format(*pubkeys)
+        # No checksum, we are only ever called at startup before any thread
+        checksum = self.bitcoind.getdescriptorinfo(desc)["checksum"]
+        res = self.bitcoind.importmulti([{
+            "desc": "{}#{}".format(desc, checksum),
+            "timestamp": self.birthdate,
+            "watchonly": True,
+            "label": "revault_emergency_vault"
+        }])
+        if not res[0]["success"]:
+            raise Exception("Failed to import emergency pubkeys. "
+                            "Descriptor: {}, result: {}"
+                            .format(desc, str(res)))
+
     def update_watched_addresses(self):
         """Update the watchonly addresses"""
         # FIXME: ugly
@@ -153,22 +174,21 @@ class Vault:
             addr = str(CBitcoinAddress.from_scriptPubKey(txo.scriptPubKey))
             if addr not in self.watched_addresses:
                 self.watched_addresses.append(addr)
-        descriptor = "wsh(multi(4,{}/*,{}/*,{}/*,{}/*))".format(
-            *self.all_xpubs)
+        desc = "wsh(multi(4,{}/*,{}/*,{}/*,{}/*))".format(*self.all_xpubs)
         self.bitcoind_lock.acquire()
-        checksum = self.bitcoind.getdescriptorinfo(descriptor)["checksum"]
+        checksum = self.bitcoind.getdescriptorinfo(desc)["checksum"]
         res = self.bitcoind.importmulti([{
-            "desc": "{}#{}".format(descriptor, checksum),
+            "desc": "{}#{}".format(desc, checksum),
             "timestamp": self.birthdate,
             "range": [self.current_index, self.max_index],
             "watchonly": True,
-            "label": "revault"
+            "label": "revault_vault"
         }])
         self.bitcoind_lock.release()
         if not res[0]["success"]:
             raise Exception("Failed to import xpubs. "
                             "Descriptor: {}, result: {}"
-                            .format(descriptor, str(res)))
+                            .format(desc, str(res)))
 
     def get_vault_address(self, index):
         """Get the vault address for index {index}"""
