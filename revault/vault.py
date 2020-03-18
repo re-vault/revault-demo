@@ -288,9 +288,17 @@ class Vault:
         while not self.poller_stop.wait(5.0):
             known_outputs = [v["txid"] for v in self.vaults]
             self.bitcoind_lock.acquire()
-            vault_utxos = [utxo for utxo in self.bitcoind.listunspent()
-                           if utxo["address"] in self.watched_addresses
-                           and utxo["txid"] not in known_outputs]
+            vault_utxos = []
+            for utxo in self.bitcoind.listunspent():
+                if utxo["address"] in self.watched_addresses \
+                        and utxo["txid"] not in known_outputs:
+                    vault_utxos.append(utxo)
+                elif utxo["address"] == self.emergency_address:
+                    # FIXME: Should we put up the red lights here ?
+                    tx = self.bitcoind.gettransaction(utxo["txid"])["hex"]
+                    prev = self.bitcoind.decoderawtransaction(tx)["vin"][0]
+                    self.vaults = [v for v in self.vaults
+                                   if v["txid"] != prev["txid"]]
             self.bitcoind_lock.release()
             for output in vault_utxos:
                 self.vaults_lock.acquire()
