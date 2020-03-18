@@ -1,55 +1,21 @@
 import bitcoin
-import os
 import random
 import unittest
 
 from bip32 import BIP32
 from bitcoin.core import b2x
-from bitcoin.wallet import CKey
 from fixtures import *  # noqa: F401,F403
 from utils import SIGSERV_URL, wait_for
-from revault import Vault
 
 
 bitcoin.SelectParams("regtest")
 
 
-def get_random_vault(bitcoind_conf, our_seed=None, xpubs=None,
-                     serv_pubkey=None, emer_pubkeys=None, whoami=1):
-    """Create a vault instance."""
-    # Us
-    if our_seed is None:
-        our_seed = os.urandom(32)
-    our_bip32 = BIP32.from_seed(our_seed)
-    our_xpriv = our_bip32.get_master_xpriv()
-    # Our fellow stakeholders
-    if xpubs is None:
-        others_bip32 = [BIP32.from_seed(os.urandom(32)) for i in range(3)]
-        xpubs = [keychain.get_master_xpub() for keychain in others_bip32]
-    # Are we one of the traders or a normie stakeholder ?
-    if whoami == 1:
-        all_xpubs = [our_bip32.get_master_xpub()] + xpubs
-    elif whoami == 2:
-        all_xpubs = [xpubs[0], our_bip32.get_master_xpub()] + xpubs[1:]
-    elif whoami == 3:
-        all_xpubs = xpubs[:2] + [our_bip32.get_master_xpub(), xpubs[2]]
-    elif whoami == 4:
-        all_xpubs = xpubs + [our_bip32.get_master_xpub()]
-    if serv_pubkey is None:
-        serv_pubkey = CKey(os.urandom(32)).pub
-    if emer_pubkeys is None:
-        emer_pubkeys = [CKey(os.urandom(32)).pub for i in range(4)]
-    if not SIGSERV_URL.startswith("http"):
-        sigserv_url = "http://{}".format(SIGSERV_URL)
-    else:
-        sigserv_url = SIGSERV_URL
-    return Vault(our_xpriv, all_xpubs, serv_pubkey, emer_pubkeys,
-                 bitcoind_conf, sigserv_url)
-
-
-def test_vault_address(bitcoind):
-    for i in range(1, 4):
-        vault = get_random_vault(bitcoind.rpc.__btc_conf_file__, whoami=i)
+def test_vault_address(vault_factory):
+    vaults = vault_factory.get_vaults()
+    # FIXME: separate the Bitcoin backends !!
+    bitcoind = vaults[0].bitcoind
+    for vault in vaults:
         # It's burdensome to our xpub to be None in the list, but it allows us
         # to know which of the stakeholders we are, so..
         all_xpubs = [keychain.get_master_xpub() if keychain
@@ -58,7 +24,7 @@ def test_vault_address(bitcoind):
         # bitcoind should always return the same address as us
         for i in range(3):
             vault_first_address = vault.getnewaddress()
-            bitcoind_first_address = bitcoind.rpc.addmultisigaddress(4, [
+            bitcoind_first_address = bitcoind.addmultisigaddress(4, [
                 b2x(BIP32.from_xpub(xpub).get_pubkey_from_path([i]))
                 for xpub in all_xpubs
             ])["address"]
@@ -83,10 +49,10 @@ def test_sigserver(bitcoind, sigserv):
 
 @unittest.skipIf(SIGSERV_URL == "", "We want to test against a running Flask"
                                     " instance, not test_client()")
-def test_sigserver_feerate(bitcoind):
+def test_sigserver_feerate(vault_factory):
     """We just test that it gives us a (valid) feerate."""
     # FIXME: Test that it sends the same feerate with same txid
-    vault = get_random_vault(bitcoind.rpc.__btc_conf_file__)
+    vault = vault_factory.get_vaults()[0]
     # GET emergency feerate
     feerate = vault.get_emergency_feerate("high_entropy")
     # sats/vbyte, if it's less there's something going on !
@@ -95,41 +61,48 @@ def test_sigserver_feerate(bitcoind):
 
 @unittest.skipIf(SIGSERV_URL == "", "We want to test against a running Flask"
                                     " instance, not test_client()")
-def test_signatures_posting(bitcoind):
+def test_signatures_posting(vault_factory):
     """Test that we can send signatures to the sig server."""
-    vault = get_random_vault(bitcoind.rpc.__btc_conf_file__)
+    vault = vault_factory.get_vaults()[0]
     vault.send_signature("00af", "aa56")
 
 
 @unittest.skipIf(SIGSERV_URL == "", "We want to test against a running Flask"
                                     " instance, not test_client()")
-def test_funds_polling(bitcoind):
+def test_funds_polling(vault_factory):
     """Test that we are aware of the funds we receive."""
-    vault = get_random_vault(bitcoind.rpc.__btc_conf_file__)
+    vault = vault_factory.get_vaults()[0]
+    # FIXME: separate the Bitcoin backends !!
+    bitcoind = vault.bitcoind
     assert len(vault.vaults) == 0
     # Send new funds to it
     for i in range(3):
-        txid = bitcoind.rpc.sendtoaddress(vault.getnewaddress(), 10)
-        bitcoind.generate_block(1, [txid])
+        txid = bitcoind.sendtoaddress(vault.getnewaddress(), 10)
+        wait_for(lambda: txid in bitcoind.getrawmempool())
+        bitcoind.generatetoaddress(1, bitcoind.getnewaddress())
     wait_for(lambda: len(vault.vaults) == 3)
     # Retry with a gap
     for _ in range(20):
         vault.getnewaddress()
     for i in range(2):
-        txid = bitcoind.rpc.sendtoaddress(vault.getnewaddress(), 10)
-        bitcoind.generate_block(1, [txid])
+        txid = bitcoind.sendtoaddress(vault.getnewaddress(), 10)
+        wait_for(lambda: txid in bitcoind.getrawmempool())
+        bitcoind.generatetoaddress(1, bitcoind.getnewaddress())
     wait_for(lambda: len(vault.vaults) == 5)
 
 
 @unittest.skipIf(SIGSERV_URL == "", "We want to test against a running Flask"
                                     " instance, not test_client()")
-def test_emergency_sending(bitcoind):
+def test_emergency_sending(vault_factory):
     """Test that we share the emergency transaction signature."""
-    vault = get_random_vault(bitcoind.rpc.__btc_conf_file__)
+    vault = vault_factory.get_vaults()[0]
+    # FIXME: separate the Bitcoin backends !!
+    bitcoind = vault.bitcoind
     assert len(vault.vaults) == 0
     # Send new funds to it
-    txid = bitcoind.rpc.sendtoaddress(vault.getnewaddress(), 10)
-    bitcoind.generate_block(1, [txid])
+    txid = bitcoind.sendtoaddress(vault.getnewaddress(), 10)
+    wait_for(lambda: txid in bitcoind.getrawmempool())
+    bitcoind.generatetoaddress(1, bitcoind.getnewaddress())
     wait_for(lambda: len(vault.vaults) == 1)
     # We send then request it, hence if we succesfully requested it, we
     # succesfully delivered it to the sig server
