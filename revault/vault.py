@@ -1,6 +1,7 @@
 import bitcoin.rpc
 import requests
 import threading
+import time
 
 from bip32 import BIP32
 from bitcoin.core import b2x, lx, COIN
@@ -21,7 +22,8 @@ class Vault:
     vault.
     """
     def __init__(self, xpriv, xpubs, server_pubkey, emergency_pubkeys,
-                 bitcoin_conf_path, sigserver_url, current_index=0):
+                 bitcoin_conf_path, sigserver_url, current_index=0,
+                 birthdate=None):
         """
         We need the xpub of all the other stakeholders to derive their pubkeys.
 
@@ -37,6 +39,8 @@ class Vault:
         :param bitcoin_conf_path: Path to bitcoin.conf.
         :param sigserver_url: The url of the server to post / get the sigs from
                               other stakeholders.
+        :param birthdate: The timestamp at which this wallet has been created.
+                          If not passed, will assume newly-created wallet.
         """
         assert len(xpubs) == 4
         self.our_bip32 = BIP32.from_xpriv(xpriv)
@@ -46,13 +50,16 @@ class Vault:
                 self.keychains.append(BIP32.from_xpub(xpub))
             else:
                 self.keychains.append(None)
+        self.all_xpubs = xpubs
         self.server_pubkey = server_pubkey
         self.emergency_pubkeys = emergency_pubkeys
         self.current_index = current_index
         # FIXME: Use the sig server to adjust the gap limit
-        self.max_index = current_index + 20
+        self.max_index = current_index + 500
         # Needs to be acquired to access any of the above
         self.keys_lock = threading.Lock()
+
+        self.birthdate = int(time.time()) if birthdate is None else birthdate
 
         self.bitcoind = bitcoin.rpc.RawProxy(btc_conf_file=bitcoin_conf_path)
         # Needs to be acquired to send RPC commands
@@ -130,23 +137,31 @@ class Vault:
         self.keys_lock.release()
         return pubkeys
 
-    def watch_output(self, txo):
-        """Import this output as watchonly to bitcoind.
-
-        :param txo: The output to watch, a CTxOutput.
-        """
-        addr = str(CBitcoinAddress.from_scriptPubKey(txo.scriptPubKey))
-        self.watched_addresses.append(addr)
-        self.bitcoind_lock.acquire()
-        # FIXME: Optimise this...
-        self.bitcoind.importaddress(addr, "revault", True)
-        self.bitcoind_lock.release()
-
     def update_watched_addresses(self):
         """Update the watchonly addresses"""
+        # FIXME: ugly
         for i in range(self.current_index, self.max_index):
             pubkeys = self.get_pubkeys(i)
-            self.watch_output(vault_txout(pubkeys, 0))
+            txo = vault_txout(pubkeys, 0)
+            addr = str(CBitcoinAddress.from_scriptPubKey(txo.scriptPubKey))
+            if addr not in self.watched_addresses:
+                self.watched_addresses.append(addr)
+        descriptor = "wsh(multi(4,{}/*,{}/*,{}/*,{}/*))".format(
+            *self.all_xpubs)
+        self.bitcoind_lock.acquire()
+        checksum = self.bitcoind.getdescriptorinfo(descriptor)["checksum"]
+        res = self.bitcoind.importmulti([{
+            "desc": "{}#{}".format(descriptor, checksum),
+            "timestamp": self.birthdate,
+            "range": [self.current_index, self.max_index],
+            "watchonly": True,
+            "label": "revault"
+        }])
+        self.bitcoind_lock.release()
+        if not res[0]["success"]:
+            raise Exception("Failed to import xpubs. "
+                            "Descriptor: {}, result: {}"
+                            .format(descriptor, str(res)))
 
     def get_vault_address(self, index):
         """Get the vault address for index {index}"""
