@@ -155,6 +155,7 @@ def test_emergency_broadcast(vault_factory):
         txid = bitcoind.sendrawtransaction(b2x(tx.serialize()))
         wait_for(lambda: txid in bitcoind.getrawmempool())
         bitcoind.generatetoaddress(1, bitcoind.getnewaddress())
+    wait_for(lambda: len(vault.vaults) == 0)
 
 
 @unittest.skipIf(SIGSERV_URL == "", "We want to test against a running Flask"
@@ -178,24 +179,26 @@ def test_vault_address_reuse(vault_factory):
     txid = bitcoind.sendrawtransaction(b2x(tx.serialize()))
     wait_for(lambda: txid in bitcoind.getrawmempool())
     bitcoind.generatetoaddress(1, bitcoind.getnewaddress())
+    wait_for(lambda: len(vault.vaults) == 0)
     # Second send
     txid = bitcoind.sendtoaddress(address, 12)
     wait_for(lambda: txid in bitcoind.getrawmempool())
     bitcoind.generatetoaddress(1, bitcoind.getnewaddress())
-    wait_for(lambda: len(vault.vaults) == 2)
-    wait_for(lambda: vault.vaults[1]["emergency_signed"])
+    wait_for(lambda: len(vault.vaults) == 1)
+    wait_for(lambda: all(v["emergency_signed"] for v in vault.vaults))
     # We should still be able to broadcast the emergency tx !
-    tx = vault.vaults[1]["emergency_tx"]
+    tx = vault.vaults[0]["emergency_tx"]
     txid = bitcoind.sendrawtransaction(b2x(tx.serialize()))
     wait_for(lambda: txid in bitcoind.getrawmempool())
     bitcoind.generatetoaddress(1, bitcoind.getnewaddress())
+    wait_for(lambda: len(vault.vaults) == 0)
     # If two outputs to the same address are created before we spend one of
     # them, we should still be fine.
     for _ in range(2):
         txid = bitcoind.sendtoaddress(address, 12)
         wait_for(lambda: txid in bitcoind.getrawmempool())
         bitcoind.generatetoaddress(1, bitcoind.getnewaddress())
-    wait_for(lambda: len(vault.vaults) == 4)
+    wait_for(lambda: len(vault.vaults) == 2)
     wait_for(lambda: all(v["emergency_signed"] for v in vault.vaults))
     for tx in [v["emergency_tx"] for v in vault.vaults[2:]]:
         txid = bitcoind.sendrawtransaction(b2x(tx.serialize()))
