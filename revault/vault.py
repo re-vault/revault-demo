@@ -96,7 +96,6 @@ class Vault:
         #   "unvault_emergency_tx": CTransaction or None,
         # }
         # The amount is in satoshis.
-        # FIXME: should we drop spent vaults ?
         self.vaults = []
         self.vaults_lock = threading.Lock()
 
@@ -174,6 +173,7 @@ class Vault:
             addr = str(CBitcoinAddress.from_scriptPubKey(txo.scriptPubKey))
             if addr not in self.watched_addresses:
                 self.watched_addresses.append(addr)
+
         desc = "wsh(multi(4,{}/*,{}/*,{}/*,{}/*))".format(*self.all_xpubs)
         self.bitcoind_lock.acquire()
         checksum = self.bitcoind.getdescriptorinfo(desc)["checksum"]
@@ -311,21 +311,23 @@ class Vault:
                 self.max_index += 1
                 if self.current_index > self.index_treshold - 20:
                     self.update_watched_addresses()
-            # Ok we updated our owned outputs, restart the emergency
-            # transactions gathering with the updated vaults list
-            self.update_emer_stop.set()
-            if self.update_emer_thread is not None:
-                try:
-                    self.update_emer_thread.join()
-                except RuntimeError:
-                    # Already dead
-                    pass
-            self.update_emer_stop.clear()
-            # You cant just restart threads in Python :-(
-            del self.update_emer_thread
-            self.update_emer_thread = \
-                threading.Thread(target=self.update_all_emergency_signatures)
-            self.update_emer_thread.start()
+            if len(vault_utxos) > 0:
+                # Ok we updated our owned outputs, restart the emergency
+                # transactions gathering with the updated vaults list
+                self.update_emer_stop.set()
+                if self.update_emer_thread is not None:
+                    try:
+                        self.update_emer_thread.join()
+                    except RuntimeError:
+                        # Already dead
+                        pass
+                self.update_emer_stop.clear()
+                # You cant just restart threads in Python :-(
+                del self.update_emer_thread
+                self.update_emer_thread = \
+                    threading.Thread(target=self.
+                                     update_all_emergency_signatures)
+                self.update_emer_thread.start()
 
     def send_signature(self, txid, sig):
         """Send the signature {sig} for tx {txid} to the sig server."""
