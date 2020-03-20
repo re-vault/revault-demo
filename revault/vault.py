@@ -1,5 +1,4 @@
 import bitcoin.rpc
-import requests
 import threading
 import time
 
@@ -7,6 +6,7 @@ from bip32 import BIP32
 from bitcoin.core import b2x, lx, COIN
 from bitcoin.wallet import CBitcoinAddress
 from decimal import Decimal, getcontext
+from .serverapi import ServerApi
 from .transactions import (
     vault_txout, emergency_txout, create_and_sign_emergency_vault_tx,
     form_emergency_vault_tx, get_transaction_size,
@@ -76,10 +76,10 @@ class Vault:
         self.emergency_address = str(CBitcoinAddress
                                      .from_scriptPubKey(txo.scriptPubKey))
 
-        # No lock we don't ever modify it
-        self.sigserver_url = sigserver_url
-        if self.sigserver_url.endswith('/'):
-            self.sigserver_url = self.sigserver_url[:-1]
+        if sigserver_url.endswith('/'):
+            self.sigserver = ServerApi(sigserver_url[:-1])
+        else:
+            self.sigserver = ServerApi(sigserver_url)
         self.watched_addresses = []
         self.update_watched_addresses()
 
@@ -209,21 +209,6 @@ class Vault:
             self.update_watched_addresses()
         return addr
 
-    def get_emergency_feerate(self, txid):
-        """Get the feerate for the emergency transaction.
-
-        :param txid: The emergency transaction id, as str.
-        :return: The feerate in **sat/VByte**, as int.
-        """
-        r = requests.get("{}/emergency_feerate/{}".format(self.sigserver_url,
-                                                          txid))
-        if not r.status_code == 200:
-            raise Exception("The sigserver returned with '{}', saying '{}'"
-                            .format(r.status_code, r.text))
-        btc_perkvb = Decimal(r.json()["feerate"])
-        # Explicit conversion to sat per virtual byte
-        return int(btc_perkvb * Decimal(COIN) / Decimal(1000))
-
     def guess_index(self, vault_address):
         """Guess the index used to derive the 4 pubkeys used in this 4of4.
 
@@ -267,7 +252,8 @@ class Vault:
                                                amount, vault["amount"],
                                                self.emergency_pubkeys, [])
         tx_size = get_transaction_size(dummy_tx)
-        fees = self.get_emergency_feerate(b2x(dummy_tx.GetTxid())) * tx_size
+        feerate = self.sigserver.get_emergency_feerate(b2x(dummy_tx.GetTxid()))
+        fees = feerate * tx_size
         amount = vault["amount"] - fees
         vault["emergency_tx"], sigs = \
             create_and_sign_emergency_vault_tx(lx(vault["txid"]),
@@ -275,7 +261,10 @@ class Vault:
                                                amount, vault["amount"],
                                                self.emergency_pubkeys,
                                                [privkey])
-        self.send_signature(b2x(vault["emergency_tx"].GetTxid()), sigs[0])
+        # Who am I ?
+        stk_id = self.keychains.index(None) + 1
+        self.sigserver.send_signature(b2x(vault["emergency_tx"].GetTxid()),
+                                      sigs[0], stk_id)
         self.vaults.append(vault)
 
     def poll_for_funds(self):
@@ -329,41 +318,6 @@ class Vault:
                                      update_all_emergency_signatures)
                 self.update_emer_thread.start()
 
-    def send_signature(self, txid, sig):
-        """Send the signature {sig} for tx {txid} to the sig server."""
-        if isinstance(sig, bytes):
-            sig = sig.hex()
-        elif not isinstance(sig, str):
-            raise Exception("The signature must be either bytes or a valid hex"
-                            " string")
-        # Who am I ?
-        stakeholder_id = self.keychains.index(None) + 1
-        r = requests.post("{}/sig/{}/{}".format(self.sigserver_url, txid,
-                                                stakeholder_id),
-                          data={"sig": sig})
-        if not r.status_code == 201:
-            raise Exception("stakeholder #{}: Could not send sig '{}' for"
-                            " txid {}.".format(stakeholder_id, sig, txid))
-
-    def get_signature(self, txid, stakeholder_id):
-        """Request a signature to the signature server.
-
-        :param txid: The txid of the transaction we're interested in.
-        :param stakeholder_id: Which stakeholder's sig do we need.
-
-        :return: The signature as bytes, or None if not found.
-        """
-        r = requests.get("{}/sig/{}/{}".format(self.sigserver_url, txid,
-                                               stakeholder_id))
-        if r.status_code == 200:
-            return bytes.fromhex(r.json()["sig"])
-        elif r.status_code == 404:
-            return None
-        else:
-            raise Exception("Requesting stakeholder #{}'s signature for tx "
-                            "{}, response {}".format(stakeholder_id, txid,
-                                                     r.text))
-
     def update_emergency_signatures(self, vault):
         """Don't stop polling the sig server until we have all the sigs.
 
@@ -378,7 +332,7 @@ class Vault:
                 if vault["emergency_sigs"][i - 1] is None:
                     self.vaults_lock.acquire()
                     vault["emergency_sigs"][i - 1] = \
-                        self.get_signature(txid, i)
+                        self.sigserver.get_signature(txid, i)
                     self.vaults_lock.release()
         # Only populate the sigs if we got them all, not if master told us to
         # stop.

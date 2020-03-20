@@ -54,7 +54,7 @@ def test_sigserver_feerate(vault_factory):
     # FIXME: Test that it sends the same feerate with same txid
     vault = vault_factory.get_vaults()[0]
     # GET emergency feerate
-    feerate = vault.get_emergency_feerate("high_entropy")
+    feerate = vault.sigserver.get_emergency_feerate("high_entropy")
     # sats/vbyte, if it's less there's something going on !
     assert feerate >= 1
 
@@ -64,7 +64,9 @@ def test_sigserver_feerate(vault_factory):
 def test_signatures_posting(vault_factory):
     """Test that we can send signatures to the sig server."""
     vault = vault_factory.get_vaults()[0]
-    vault.send_signature("00af", "aa56")
+    # Who am I ?
+    stk_id = vault.keychains.index(None) + 1
+    vault.sigserver.send_signature("00af", "aa56", stk_id)
 
 
 @unittest.skipIf(SIGSERV_URL == "", "We want to test against a running Flask"
