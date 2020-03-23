@@ -50,13 +50,15 @@ class ServerApi:
             raise Exception("Requesting stakeholder #{}'s signature for tx "
                             "{}, response {}".format(stk_id, txid, r.text))
 
-    def get_emergency_feerate(self, txid):
+    def get_feerate(self, tx_type, txid):
         """Get the feerate for the emergency transaction.
 
+        :param tx_type: One of "unvault", "spend", "cancel", or "emergency".
         :param txid: The emergency transaction id, as str.
+
         :return: The feerate in **sat/VByte**, as int.
         """
-        r = requests.get("{}/feerate/emergency/{}".format(self.url, txid))
+        r = requests.get("{}/feerate/{}/{}".format(self.url, tx_type, txid))
         if not r.status_code == 200:
             raise Exception("The sigserver returned with '{}', saying '{}'"
                             .format(r.status_code, r.text))
