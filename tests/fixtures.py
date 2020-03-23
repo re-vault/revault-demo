@@ -50,16 +50,13 @@ def directory(request, test_base_dir, test_name):
     # of accessing it directly.
     rep_call = getattr(request.node, 'rep_call', None)
     outcome = 'passed' if rep_call is None else rep_call.outcome
-    failed = not outcome or request.node.has_errors or outcome != 'passed'
+    failed = not outcome or outcome != 'passed'
 
-    # FIXME
-    """
     if not failed:
         shutil.rmtree(directory)
     else:
         logging.debug("Test execution failed, leaving the test directory {}"
                       " intact.".format(directory))
-    """
 
 
 @pytest.fixture
