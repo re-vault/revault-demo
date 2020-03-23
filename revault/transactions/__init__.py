@@ -196,36 +196,53 @@ def form_emergency_vault_tx(tx, emer_pubkeys, sigs):
     return create_spend_vault_txout(tx, emer_pubkeys, sigs)
 
 
-def spend_unvault_txout(unvault_txid, unvault_vout, privkeys,
-                        pub_server, txout, prev_value):
+def create_unvault_spend(unvault_txid, unvault_vout, txout):
     """Creates a transaction spending from an unvault transaction.
+
+    :param unvault_txid: The id of the unvaulting transaction.
+    :param unvault_vout: The index of the unvault output in this transaction.
+    :param txout: The txo (a CTxOut) to spend the coins to.
+
+    :return: The unsigned transaction, a CMutableTransaction.
+    """
+    txin = CTxIn(COutPoint(unvault_txid, unvault_vout))
+    return CMutableTransaction([txin], [txout], nVersion=2)
+
+
+def sign_unvault_spend(tx, privkeys, pubkeys, pub_server, prev_value):
+    """Signs a transaction spending from an unvault transaction.
 
     This is the "all stakeholders sign" path of the script, not encumbered by a
     timelock.
     This path is used for both the emergency and cancel transactions.
 
-    :param unvault_txid: The id of the unvaulting transaction.
-    :param unvault_vout: The index of the unvault output in this transaction.
-    :param privkeys: A list of the private keys of the four stakeholders to
-                     sign the transaction.
-    :param pub_server: The public key of the cosigning server.
-    :param txout: The txo (a CTxOut) to spend the coins to.
+    :param tx: The unsigned transaction, a CMutableTransaction.
+    :param privkeys: The private keys to sign the transaction with (a list).
+    :param pubkeys: The pubkeys of the stakeholders.
+    :param pub_server: The pubkey of the cosigning server.
     :param prev_value: The prevout's value in satoshis.
 
-    :return: The signed transaction, a CTransaction.
+    :return: The signatures for the provided privkeys (a list).
     """
-    privkeys = [CKey(k) for k in privkeys]
-    pubkeys = [k.pub for k in privkeys]
-    # A dummy txin to create the transaction hash to sign
-    txin = CTxIn(COutPoint(unvault_txid, unvault_vout))
-    tx = CMutableTransaction([txin], [txout], nVersion=2)
     tx_hash = SignatureHash(unvault_script(*pubkeys, pub_server), tx,
                             0, SIGHASH_ALL, prev_value,
                             SIGVERSION_WITNESS_V0)
-    # A signature per pubkey
-    sigs = [key.sign(tx_hash) + bytes([SIGHASH_ALL]) for key in privkeys[::-1]]
-    # Spending a P2WSH, so the witness is <unlocking_script> <actual_script>.
-    # Here, unlocking_script is the four signatures.
+    return [key.sign(tx_hash) + bytes([SIGHASH_ALL]) for key in privkeys[::-1]]
+
+
+def form_unvault_spend(tx, sigs, pubkeys, pub_server):
+    """Forms the transaction spending from an unvault using fours signatures.
+
+    :param tx: The unsigned transaction, a CMutableTransaction.
+    :param sigs: The list of the four signatures in the same order as the
+                 following pubkeys.
+    :param pubkeys: The pubkeys of the stakeholders, to form the script.
+    :param pub_server: The pubkey of the cosigning server, to form the script.
+
+    :return: The immutable signed transaction, a CTransaction.
+    """
+    # Note that we use 4 sigs, but no CHECKMULTISIG, so no empty byte array at
+    # the begining of this one!
     witness_script = [*sigs, unvault_script(*pubkeys, pub_server)]
     witness = CTxInWitness(CScriptWitness(witness_script))
     tx.wit = CTxWitness([witness])
@@ -233,80 +250,133 @@ def spend_unvault_txout(unvault_txid, unvault_vout, privkeys,
     return CTransaction.from_tx(tx)
 
 
-def cancel_unvault_tx(unvault_txid, unvault_vout, privkeys,
-                      pub_server, pubkeys, value, prev_value):
+def create_cancel_tx(unvault_txid, unvault_vout, pubkeys, value):
     """The transaction which reverts a spend_tx to an "usual" vault, a 4of4.
 
     :param unvault_txid: The id of the unvaulting transaction.
     :param unvault_vout: The index of the unvault output in this transaction.
-    :param privkeys: A list of the private keys of the four stakeholders to
-                     sign the transaction.
-    :param pub_server: The public key of the cosigning server.
     :param pubkeys: A list of the four public keys of the four stakeholders for
                     the new vault. Can be the same keys.
-    :param value: The output value in satoshis.
-    :param prev_value: The prevout's value in satoshis.
+    :param value: The amount of the new vault.
 
-    :return: The signed unvaulting transaction, a CTransaction.
+    :return: The unsigned transaction, a CMutableTransaction.
     """
     # We pay back to a vault
     txout = vault_txout(pubkeys, value)
-    return spend_unvault_txout(unvault_txid, unvault_vout, privkeys,
-                               pub_server, txout, prev_value)
+    return create_unvault_spend(unvault_txid, unvault_vout, txout)
 
 
-def emergency_unvault_tx(unvault_txid, unvault_vout, privkeys,
-                         pub_server, emer_pubkeys, value, prev_value):
-    """The transaction which reverts a spend_tx to the offline 4of4.
+def sign_cancel_tx(tx, privkeys, pubkeys, pub_server, prev_value):
+    """Signs the cancel transaction with the given privkeys.
+
+    :param tx: The unsigned transaction, a CMutableTransaction.
+    :param privkeys: The private keys to sign the transaction with (a list).
+    :param pubkeys: The pubkeys of the stakeholders.
+    :param pub_server: The pubkey of the cosigning server.
+    :param prev_value: The prevout's value in satoshis.
+
+    :return: The signatures for the provided privkeys (a list).
+    """
+    return sign_unvault_spend(tx, privkeys, pubkeys, pub_server, prev_value)
+
+
+def form_cancel_tx(tx, sigs, pubkeys, pub_server):
+    """Forms the cancel transaction using fours signatures.
+
+    :param tx: The unsigned transaction, a CMutableTransaction.
+    :param sigs: The list of the four signatures in the same order as the
+                 following pubkeys.
+    :param pubkeys: The pubkeys of the stakeholders, to form the script.
+    :param pub_server: The pubkey of the cosigning server, to form the script.
+
+    :return: The immutable signed transaction, a CTransaction.
+    """
+    return form_unvault_spend(tx, sigs, pubkeys, pub_server)
+
+
+def create_emer_unvault_tx(unvault_txid, unvault_vout, emer_pubkeys, value):
+    """Create the transaction which reverts a spend_tx to the offline 4of4.
 
     :param unvault_txid: The id of the unvaulting transaction.
     :param unvault_vout: The index of the unvault output in this transaction.
-    :param privkeys: A list of the private keys of the four stakeholders to
-                     sign the transaction.
-    :param pub_server: The public key of the cosigning server.
     :param emer_pubkeys: A list of the four emergency public keys of the four
                          stakeholders.
     :param value: The output value in satoshis.
-    :param prev_value: The prevout's value in satoshis.
 
-    :return: The signed unvaulting transaction, a CTransaction.
+    :return: The unsigned unvaulting transaction, a CMutableTransaction.
     """
     # We pay to the emergency script
     txout = emergency_txout(emer_pubkeys, value)
-    return spend_unvault_txout(unvault_txid, unvault_vout, privkeys,
-                               pub_server, txout, prev_value)
+    return create_unvault_spend(unvault_txid, unvault_vout, txout)
 
 
-def sign_spend_tx(unvault_txid, unvault_vout, privkeys, pubkeys,
-                  pub_server, address, value, prev_value):
-    """Signs the transaction which spends the unvault_tx after the relative
+def sign_emer_unvault_tx(tx, privkeys, pubkeys, pub_server, prev_value):
+    """Sign the transaction which reverts a spend_tx to the offline 4of4.
+
+    :param tx: The unsigned transaction, a CMutableTransaction.
+    :param privkeys: A list of the private keys to sign the transaction with.
+    :param pubkeys: A list of all the stakeholders' vault public keys.
+    :param pub_server: The public key of the cosigning server.
+    :param prev_value: The prevout's value in satoshis.
+
+    :return: A list of the signature for each provided private key.
+    """
+    return sign_unvault_spend(tx, privkeys, pubkeys, pub_server, prev_value)
+
+
+def form_emer_unvault_tx(tx, sigs, pubkeys, pub_server):
+    """Forms the transaction which reverts a spend_tx to the offline 4of4.
+
+    :param tx: The unsigned transaction, a CMutableTransaction.
+    :param sigs: The list of the four signatures in the same order as the
+                 following pubkeys.
+    :param pubkeys: The pubkeys of the stakeholders, to form the script.
+    :param pub_server: The pubkey of the cosigning server, to form the script.
+
+    :return: The immutable signed transaction, a CTransaction.
+    """
+    return form_unvault_spend(tx, sigs, pubkeys, pub_server)
+
+
+def create_spend_tx(unvault_txid, unvault_vout, value, address):
+    """Create the transaction which spends the unvault_tx after the relative
     locktime with the given private keys.
 
     :param unvault_txid: The id of the unvaulting transaction.
     :param unvault_vout: The index of the unvault output in this transaction.
-    :param privkeys: A list of the private keys to sign the tx with.
-    :param pubkeys: A list of the 4 stakeholders' pubkeys.
-    :param pub_server: The public key of the cosigning server.
     :param address: The address to "send the coins to", we'll derive the
                     scriptPubKey out of it.
     :param value: The output value in satoshis.
-    :param prev_value: The prevout's value in satoshis.
 
-    :return: A tuple composed of the *unsigned* unvaulting transaction (a
-             CMutableTransaction) and the signatures for the pubkeys.
+    :return: The unsigned transaction, a CMutableTransaction.
     """
-    privkeys = [CKey(k) for k in privkeys]
     txout = CTxOut(value, CBitcoinAddress(address).to_scriptPubKey())
     txin = CTxIn(COutPoint(unvault_txid, unvault_vout), nSequence=6)
-    tx = CMutableTransaction([txin], [txout], nVersion=2)
+    return CMutableTransaction([txin], [txout], nVersion=2)
+
+
+def sign_spend_tx(tx, privkeys, pubkeys, pub_server, prev_value):
+    """Signs the transaction which spends the unvault_tx after the relative
+    locktime with the given private keys.
+
+    :param tx: The unsigned transaction, a CMutableTransaction.
+    :param privkeys: A list of the private keys to sign the tx with.
+    :param pubkeys: A list of the 4 stakeholders' pubkeys, to form the script.
+    :param pub_server: The public key of the cosigning server, to form the
+                       script.
+    :param prev_value: The prevout's value in satoshis.
+
+    :return: A list of the signature for each given private key.
+    """
+    privkeys = [CKey(k) for k in privkeys]
     tx_hash = SignatureHash(unvault_script(*pubkeys, pub_server), tx,
                             0, SIGHASH_ALL, prev_value, SIGVERSION_WITNESS_V0)
     sigs = [key.sign(tx_hash) + bytes([SIGHASH_ALL]) for key in privkeys]
-    return tx, sigs
+    return sigs
 
 
-def create_spend_tx(tx, pubkeys, serv_pubkey, sigs):
-    """Creates the tx spending the unvault_tx after the relative locktime,
+def form_spend_tx(tx, pubkeys, serv_pubkey, sigs):
+    """Forms the tx spending the unvault_tx after the relative locktime,
     from three signatures.
 
     :param tx: The unsigned transaction, a CMutableTransaction.

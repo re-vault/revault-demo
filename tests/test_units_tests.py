@@ -17,7 +17,9 @@ from revault.transactions import (
     vault_txout, vault_script, unvault_txout, unvault_script,
     create_and_sign_unvault_tx, form_unvault_tx,
     create_and_sign_emergency_vault_tx, form_emergency_vault_tx,
-    cancel_unvault_tx, emergency_unvault_tx, sign_spend_tx, create_spend_tx,
+    create_cancel_tx, sign_cancel_tx, form_cancel_tx, create_emer_unvault_tx,
+    sign_emer_unvault_tx, form_emer_unvault_tx, create_spend_tx, sign_spend_tx,
+    form_spend_tx,
 )
 from revault.utils import empty_signature
 
@@ -228,11 +230,13 @@ def test_cancel_unvault_tx(bitcoind):
     amount_unvault = amount_vault - 500
     txid = create_unvault_tx(bitcoind, stk_privkeys, stk_pubkeys, serv_pubkey,
                              amount_vault, amount_unvault)
-    amount_emer = amount_unvault - 500
+    amount_cancel = amount_unvault - 500
     # We re-spend to the same vault
-    CTx = cancel_unvault_tx(txid, 0, stk_privkeys,
-                            serv_pubkey, stk_pubkeys, amount_emer,
-                            amount_unvault)
+    CTx = create_cancel_tx(txid, 0, stk_pubkeys, amount_cancel)
+    # FIXME: Mimic each one signing..
+    sigs = sign_cancel_tx(CTx, [CKey(k) for k in stk_privkeys], stk_pubkeys,
+                          serv_pubkey, amount_unvault)
+    CTx = form_cancel_tx(CTx, sigs, stk_pubkeys, serv_pubkey)
     bitcoind.send_tx(b2x(CTx.serialize()))
 
 
@@ -254,9 +258,11 @@ def test_emergency_unvault_tx(bitcoind):
                              amount_vault, amount_unvault)
     amount_emer = amount_unvault - 500
     # Actually vout MUST be 0.
-    CTx = emergency_unvault_tx(txid, 0, stk_privkeys,
-                               serv_pubkey, emer_pubkeys, amount_emer,
-                               amount_unvault)
+    CTx = create_emer_unvault_tx(txid, 0, emer_pubkeys, amount_emer)
+    # FIXME: Mimic each stk signing...
+    sigs = sign_emer_unvault_tx(CTx, [CKey(k) for k in stk_privkeys],
+                                stk_pubkeys, serv_pubkey, amount_unvault)
+    CTx = form_emer_unvault_tx(CTx, sigs, stk_pubkeys, serv_pubkey)
     bitcoind.send_tx(b2x(CTx.serialize()))
 
 
@@ -278,17 +284,16 @@ def test_spend_unvault_tx_two_traders(bitcoind):
     amount_spend = amount_unvault - 500
     # The address to spend to
     addr = bitcoind.getnewaddress()
+    CTx = create_spend_tx(txid, 0, amount_spend, addr)
     # The first two stakeholders are the traders
-    CTx, sigs = sign_spend_tx(txid, 0, stk_privkeys[:2], stk_pubkeys,
-                              serv_pubkey, addr, amount_spend,
-                              amount_unvault)
+    sigs = sign_spend_tx(CTx, stk_privkeys[:2], stk_pubkeys, serv_pubkey,
+                         amount_unvault)
     # We need the cosigning server sig, too !
-    CTx, sig_serv = sign_spend_tx(txid, 0, [serv_privkey], stk_pubkeys,
-                                  serv_pubkey, addr, amount_spend,
-                                  amount_unvault)
+    sig_serv = sign_spend_tx(CTx, [serv_privkey], stk_pubkeys, serv_pubkey,
+                             amount_unvault)
     # Ok we have all the sigs we need, let's spend it...
-    CTx = create_spend_tx(CTx, stk_pubkeys, serv_pubkey,
-                          [*sigs, bytes(0), *sig_serv])
+    CTx = form_spend_tx(CTx, stk_pubkeys, serv_pubkey,
+                        [*sigs, bytes(0), *sig_serv])
     # ... After the relative locktime !
     for i in range(5):
         with pytest.raises(VerifyRejectedError, match="non-BIP68-final"):
@@ -298,7 +303,7 @@ def test_spend_unvault_tx_two_traders(bitcoind):
     assert bitcoind.has_utxo(addr)
 
 
-def test_spend_unvault_tx_trader_B(bitcoind):
+def test_spend_unvault_tx_trader_second_trader(bitcoind):
     """
     This tests the unvault transaction spending with the signatures of
     the second trader and the stakeholder.
@@ -317,17 +322,16 @@ def test_spend_unvault_tx_trader_B(bitcoind):
     amount_spend = amount_unvault - 500
     # The address to spend to
     addr = bitcoind.getnewaddress()
+    CTx = create_spend_tx(txid, 0, amount_spend, addr)
     # The first two stakeholders are the traders
-    CTx, sigs = sign_spend_tx(txid, 0, stk_privkeys[1:3], stk_pubkeys,
-                              serv_pubkey, addr, amount_spend,
-                              amount_unvault)
+    sigs = sign_spend_tx(CTx, stk_privkeys[1:3], stk_pubkeys,
+                         serv_pubkey, amount_unvault)
     # We need the cosigning server sig, too !
-    CTx, sig_serv = sign_spend_tx(txid, 0, [serv_privkey], stk_pubkeys,
-                                  serv_pubkey, addr, amount_spend,
-                                  amount_unvault)
+    sig_serv = sign_spend_tx(CTx, [serv_privkey], stk_pubkeys,
+                             serv_pubkey, amount_unvault)
     # Ok we have all the sigs we need, let's spend it...
-    CTx = create_spend_tx(CTx, stk_pubkeys, serv_pubkey,
-                          [bytes(0), *sigs, *sig_serv])
+    CTx = form_spend_tx(CTx, stk_pubkeys, serv_pubkey,
+                        [bytes(0), *sigs, *sig_serv])
     # ... After the relative locktime !
     for i in range(5):
         with pytest.raises(VerifyRejectedError, match="non-BIP68-final"):
@@ -357,17 +361,16 @@ def test_spend_unvault_tx_trader_A(bitcoind):
 
     # The address to spend to
     addr = bitcoind.getnewaddress()
+    CTx = create_spend_tx(txid, 0, amount_spend, addr)
     # The first two stakeholders are the traders
-    CTx, sigs = sign_spend_tx(txid, 0, [stk_privkeys[0], stk_privkeys[2]],
-                              stk_pubkeys, serv_pubkey, addr,
-                              amount_spend, amount_unvault)
+    sigs = sign_spend_tx(CTx, [stk_privkeys[0], stk_privkeys[2]],
+                         stk_pubkeys, serv_pubkey, amount_unvault)
     # We need the cosigning server sig, too !
-    CTx, sig_serv = sign_spend_tx(txid, 0, [serv_privkey], stk_pubkeys,
-                                  serv_pubkey, addr, amount_spend,
-                                  amount_unvault)
+    sig_serv = sign_spend_tx(CTx, [serv_privkey], stk_pubkeys, serv_pubkey,
+                             amount_unvault)
     # Ok we have all the sigs we need, let's spend it...
-    CTx = create_spend_tx(CTx, stk_pubkeys, serv_pubkey,
-                          [sigs[0], bytes(0), sigs[1], *sig_serv])
+    CTx = form_spend_tx(CTx, stk_pubkeys, serv_pubkey,
+                        [sigs[0], bytes(0), sigs[1], *sig_serv])
     # ... After the relative locktime !
     for i in range(5):
         with pytest.raises(VerifyRejectedError, match="non-BIP68-final"):
