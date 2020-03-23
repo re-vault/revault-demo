@@ -44,19 +44,33 @@ class SigServer:
                     abort(404)
                 return jsonify({"sig": sig}), 200
 
-        @self.server.route("/emergency_feerate/<string:txid>",
+        @self.server.route("/feerate/<string:tx_type>/<string:txid>",
                            methods=["POST", "GET"])
-        def get_emergency_feerate(txid):
-            """Get the feerate for an emergency transaction.
+        def get_feerate(tx_type, txid):
+            """Get the feerate for any transaction.
 
-            This returns fucking virtual bytes, hopefully we have a large
-            enough room with a 10* estimate.
+            We have 4 types: unvault, cancel, spend, and emergency.
             """
+            if tx_type not in {"unvault", "cancel", "spend", "emergency"}:
+                raise Exception("Unsupported tx type for get_feerate.")
+
             if txid not in self.feerates.keys():
-                # We use 10* the conservative estimation at 1 block for such a
-                # crucial transaction
-                feerate = self.bitcoind.estimatesmartfee(1, "CONSERVATIVE")
-                self.feerates[txid] = feerate["feerate"] * Decimal(10)
+                if tx_type == "emergency":
+                    # We use 10* the conservative estimation at 2 block for
+                    # such a crucial transaction
+                    feerate = self.bitcoind.estimatesmartfee(2, "CONSERVATIVE")
+                    feerate["feerate"] *= Decimal(10)
+                elif tx_type == "cancel":
+                    # Another crucial transaction, but which is more likely to
+                    # be broadcasted: a lower high feerate.
+                    feerate = self.bitcoind.estimatesmartfee(2, "CONSERVATIVE")
+                    feerate["feerate"] *= Decimal(5)
+                else:
+                    # Not a crucial transaction (spend / unvault), but don't
+                    # greed!
+                    feerate = self.bitcoind.estimatesmartfee(3, "CONSERVATIVE")
+                self.feerates[txid] = feerate["feerate"]
+
             return jsonify({"feerate": float(self.feerates[txid])})
 
     def test_client(self):

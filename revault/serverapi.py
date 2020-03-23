@@ -56,7 +56,7 @@ class ServerApi:
         :param txid: The emergency transaction id, as str.
         :return: The feerate in **sat/VByte**, as int.
         """
-        r = requests.get("{}/emergency_feerate/{}".format(self.url, txid))
+        r = requests.get("{}/feerate/emergency/{}".format(self.url, txid))
         if not r.status_code == 200:
             raise Exception("The sigserver returned with '{}', saying '{}'"
                             .format(r.status_code, r.text))
