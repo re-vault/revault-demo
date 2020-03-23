@@ -1,4 +1,5 @@
 import bitcoin.rpc
+import threading
 
 from flask import Flask, jsonify, request, abort
 from decimal import Decimal
@@ -19,6 +20,7 @@ class SigServer:
         # We need to talk to bitcoind to gather feerates
         self.bitcoind_conf_path = bitcoind_conf_path
         self.bitcoind = bitcoin.rpc.RawProxy(btc_conf_file=bitcoind_conf_path)
+        self.bitcoind_lock = threading.Lock()
         # We need to give the same feerate to all the wallets, so we keep track
         # of the feerate we already gave by txid
         self.feerates = {}
@@ -56,19 +58,25 @@ class SigServer:
 
             if txid not in self.feerates.keys():
                 if tx_type == "emergency":
+                    self.bitcoind_lock.acquire()
                     # We use 10* the conservative estimation at 2 block for
                     # such a crucial transaction
                     feerate = self.bitcoind.estimatesmartfee(2, "CONSERVATIVE")
+                    self.bitcoind_lock.release()
                     feerate["feerate"] *= Decimal(10)
                 elif tx_type == "cancel":
+                    self.bitcoind_lock.acquire()
                     # Another crucial transaction, but which is more likely to
                     # be broadcasted: a lower high feerate.
                     feerate = self.bitcoind.estimatesmartfee(2, "CONSERVATIVE")
+                    self.bitcoind_lock.release()
                     feerate["feerate"] *= Decimal(5)
                 else:
+                    self.bitcoind_lock.acquire()
                     # Not a crucial transaction (spend / unvault), but don't
                     # greed!
                     feerate = self.bitcoind.estimatesmartfee(3, "CONSERVATIVE")
+                    self.bitcoind_lock.release()
                 self.feerates[txid] = feerate["feerate"]
 
             return jsonify({"feerate": float(self.feerates[txid])})
