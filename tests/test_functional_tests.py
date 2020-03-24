@@ -130,7 +130,6 @@ def test_emergency_tx_sync(vault_factory):
         wait_for(lambda: all(v["emergency_signed"] for v in vault.vaults))
     # All nodes should have the same emergency transactions
     for i in range(len(vaults) - 1):
-        print(vaults[i].vaults, vaults[i + 1].vaults)
         first_emer_txs = [v["emergency_tx"] for v in vaults[i].vaults]
         second_emer_txs = [v["emergency_tx"] for v in vaults[i + 1].vaults]
         for tx in first_emer_txs:
