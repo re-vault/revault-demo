@@ -227,7 +227,8 @@ def sign_unvault_spend(tx, privkeys, pubkeys, pub_server, prev_value):
     tx_hash = SignatureHash(unvault_script(*pubkeys, pub_server), tx,
                             0, SIGHASH_ALL, prev_value,
                             SIGVERSION_WITNESS_V0)
-    return [key.sign(tx_hash) + bytes([SIGHASH_ALL]) for key in privkeys[::-1]]
+    return [CKey(key).sign(tx_hash) + bytes([SIGHASH_ALL])
+            for key in privkeys[::-1]]
 
 
 def form_unvault_spend(tx, sigs, pubkeys, pub_server):

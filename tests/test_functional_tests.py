@@ -54,7 +54,7 @@ def test_sigserver_feerate(vault_factory):
     # FIXME: Test that it sends the same feerate with same txid
     vault = vault_factory.get_vaults()[0]
     # GET emergency feerate
-    feerate = vault.sigserver.get_emergency_feerate("high_entropy")
+    feerate = vault.sigserver.get_feerate("emergency", txid="high_entropy")
     # sats/vbyte, if it's less there's something going on !
     assert feerate >= 1
 

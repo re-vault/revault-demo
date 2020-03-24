@@ -234,7 +234,7 @@ def test_cancel_unvault_tx(bitcoind):
     # We re-spend to the same vault
     CTx = create_cancel_tx(txid, 0, stk_pubkeys, amount_cancel)
     # FIXME: Mimic each one signing..
-    sigs = sign_cancel_tx(CTx, [CKey(k) for k in stk_privkeys], stk_pubkeys,
+    sigs = sign_cancel_tx(CTx, stk_privkeys, stk_pubkeys,
                           serv_pubkey, amount_unvault)
     CTx = form_cancel_tx(CTx, sigs, stk_pubkeys, serv_pubkey)
     bitcoind.send_tx(b2x(CTx.serialize()))
@@ -260,8 +260,8 @@ def test_emergency_unvault_tx(bitcoind):
     # Actually vout MUST be 0.
     CTx = create_emer_unvault_tx(txid, 0, emer_pubkeys, amount_emer)
     # FIXME: Mimic each stk signing...
-    sigs = sign_emer_unvault_tx(CTx, [CKey(k) for k in stk_privkeys],
-                                stk_pubkeys, serv_pubkey, amount_unvault)
+    sigs = sign_emer_unvault_tx(CTx, stk_privkeys, stk_pubkeys, serv_pubkey,
+                                amount_unvault)
     CTx = form_emer_unvault_tx(CTx, sigs, stk_pubkeys, serv_pubkey)
     bitcoind.send_tx(b2x(CTx.serialize()))
 
