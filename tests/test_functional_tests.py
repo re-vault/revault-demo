@@ -229,3 +229,50 @@ def test_tx_chain_sync(vault_factory):
         wait_for(lambda: txid in bitcoind.getrawmempool())
         bitcoind.generatetoaddress(1, bitcoind.getnewaddress())
     wait_for(lambda: all(len(v.vaults) == 0 for v in vaults))
+
+
+def test_cancel_unvault(vault_factory):
+    """Test the unvault cancelation (cancel_tx *AND* emer_unvault_tx)"""
+    vaults = vault_factory.get_vaults()
+    # FIXME: separate the Bitcoin backends !!
+    bitcoind = vaults[0].bitcoind
+    # Sending funds to any vault address will be remarked by anyone
+    for vault in vaults:
+        txid = bitcoind.sendtoaddress(vault.getnewaddress(), 10)
+        wait_for(lambda: txid in bitcoind.getrawmempool())
+        bitcoind.generatetoaddress(1, bitcoind.getnewaddress())
+    wait_for(lambda: all(len(v.vaults) == len(vaults) for v in vaults))
+    wait_for(lambda: all(v["emergency_signed"] for v in vault.vaults))
+    wait_for(lambda: all(v["unvault_signed"] for v in vault.vaults))
+    assert all(v["unvault_secure"] for v in vault.vaults)
+    vault = random.choice(vaults)
+    # Send some cancel transaction, they pay to the same script, but the old
+    # vault is deleted from our view
+    for i in [0, 1]:
+        # FIXME: make this a helper..
+        txid = bitcoind.sendrawtransaction(b2x(vault.vaults[i]["unvault_tx"]
+                                               .serialize()))
+        wait_for(lambda: txid in bitcoind.getrawmempool())
+        bitcoind.generatetoaddress(1, bitcoind.getnewaddress())
+        txid = bitcoind.sendrawtransaction(b2x(vault.vaults[i]["cancel_tx"]
+                                               .serialize()))
+        wait_for(lambda: txid in bitcoind.getrawmempool())
+        bitcoind.generatetoaddress(1, bitcoind.getnewaddress())
+    wait_for(lambda: all(len(v.vaults) == 4 for v in vaults))
+    # We should exchange all the signatures for the new vault !
+    wait_for(lambda: all(v["emergency_signed"] for v in vault.vaults))
+    wait_for(lambda: all(v["unvault_signed"] for v in vault.vaults))
+    assert all(v["unvault_secure"] for v in vault.vaults)
+    # Send some emergency transactions, this time no new vault created !
+    for i in [2, 3]:
+        # FIXME: make this a helper..
+        txid = bitcoind.sendrawtransaction(b2x(vault.vaults[i]["unvault_tx"]
+                                               .serialize()))
+        wait_for(lambda: txid in bitcoind.getrawmempool())
+        bitcoind.generatetoaddress(1, bitcoind.getnewaddress())
+        txid = bitcoind.sendrawtransaction(
+            b2x(vault.vaults[i]["unvault_emer_tx"].serialize())
+        )
+        wait_for(lambda: txid in bitcoind.getrawmempool())
+        bitcoind.generatetoaddress(1, bitcoind.getnewaddress())
+    wait_for(lambda: all(len(v.vaults) == 4 for v in vaults))
