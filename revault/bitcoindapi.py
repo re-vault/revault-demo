@@ -116,3 +116,8 @@ class BitcoindApi:
         txid = self.bitcoind.sendrawtransaction(tx)
         self.bitcoind_lock.release()
         return txid
+
+    def importaddress(self, address, label, rescan=True):
+        self.bitcoind_lock.acquire()
+        self.bitcoind.importaddress(address, label, rescan)
+        self.bitcoind_lock.release()

@@ -11,8 +11,8 @@ from .serverapi import ServerApi
 from .transactions import (
     vault_txout, emergency_txout, create_and_sign_emergency_vault_tx,
     form_emergency_vault_tx, get_transaction_size, create_and_sign_unvault_tx,
-    create_cancel_tx, sign_cancel_tx, form_cancel_tx, create_emer_unvault_tx,
-    sign_emer_unvault_tx, form_emer_unvault_tx
+    form_unvault_tx, create_cancel_tx, sign_cancel_tx, form_cancel_tx,
+    create_emer_unvault_tx, sign_emer_unvault_tx, form_emer_unvault_tx
 )
 
 
@@ -325,6 +325,16 @@ class Vault:
                                       unvault_emer_sig, stk_id)
         self.vaults.append(vault)
 
+    def remove_vault(self, utxo):
+        """A vault was spent, remove it from our view.
+
+        :param utxo: The utxo spending the vault (an entry of listunspent).
+        """
+        tx = self.bitcoind.gettransaction(utxo["txid"])["hex"]
+        prev = self.bitcoind.decoderawtransaction(tx)["vin"][0]
+        self.vaults = [v for v in self.vaults
+                       if v["txid"] != prev["txid"]]
+
     def poll_for_funds(self):
         """Polls bitcoind to check for received funds.
 
@@ -333,19 +343,42 @@ class Vault:
         to fetch emergency transactions signatures.
         """
         while not self.poller_stop.wait(5.0):
-            known_outputs = [v["txid"] for v in self.vaults]
-            vault_utxos = []
+            # FIXME wtf: For some reasons this messes up the last list !!
+            # known_outputs, unvault_addresses, new_vault_utxos = ([],) * 3
+            known_outputs = []
+            unvault_addresses = []
+            cancel_addresses = []
+            new_vault_utxos = []
+            for v in self.vaults:
+                known_outputs.append(v["txid"])
+                unvault_addresses.append(
+                    str(CBitcoinAddress.from_scriptPubKey(
+                        v["unvault_tx"].vout[0].scriptPubKey
+                    ))
+                )
+                cancel_addresses.append(
+                    str(CBitcoinAddress.from_scriptPubKey(
+                        v["cancel_tx"].vout[0].scriptPubKey
+                    ))
+                )
+
             for utxo in self.bitcoind.listunspent():
                 if utxo["address"] in self.watched_addresses \
                         and utxo["txid"] not in known_outputs:
-                    vault_utxos.append(utxo)
+                    new_vault_utxos.append(utxo)
                 elif utxo["address"] == self.emergency_address:
                     # FIXME: Should we put up the red lights here ?
-                    tx = self.bitcoind.gettransaction(utxo["txid"])["hex"]
-                    prev = self.bitcoind.decoderawtransaction(tx)["vin"][0]
-                    self.vaults = [v for v in self.vaults
-                                   if v["txid"] != prev["txid"]]
-            for output in vault_utxos:
+                    self.vaults_lock.acquire()
+                    self.remove_vault(utxo)
+                    self.vaults_lock.release()
+                elif utxo["address"] in unvault_addresses:
+                    # FIXME: Broadcast the cancel if we don't know about the
+                    # spend
+                    self.vaults_lock.acquire()
+                    self.remove_vault(utxo)
+                    self.vaults_lock.release()
+
+            for output in new_vault_utxos:
                 self.vaults_lock.acquire()
                 self.add_new_vault(output)
                 self.vaults_lock.release()
@@ -356,7 +389,8 @@ class Vault:
                 self.max_index += 1
                 if self.current_index > self.index_treshold - 20:
                     self.update_watched_addresses()
-            if len(vault_utxos) > 0:
+
+            if len(new_vault_utxos) > 0:
                 # Ok we updated our owned outputs, restart the emergency
                 # transactions gathering with the updated vaults list
                 self.update_sigs_stop.set()
@@ -413,12 +447,13 @@ class Vault:
         if None not in vault["unvault_emer_sigs"]:
             self.vaults_lock.acquire()
             vault["unvault_emer_tx"] = \
-                form_emergency_vault_tx(vault["cancel_tx"],
-                                        vault["pubkeys"],
-                                        vault["cancel_sigs"])
+                form_emer_unvault_tx(vault["unvault_emer_tx"],
+                                     vault["unvault_emer_sigs"],
+                                     vault["pubkeys"],
+                                     self.server_pubkey)
             self.vaults_lock.release()
 
-    def update_cancel_emergency(self, vault):
+    def update_cancel_unvault(self, vault):
         txid = b2x(vault["cancel_tx"].GetTxid())
         while None in vault["cancel_sigs"] and \
                 not self.update_sigs_stop.wait(4.0):
@@ -431,30 +466,14 @@ class Vault:
         # Only populate the sigs if we got them all, not if we were stopped.
         if None not in vault["cancel_sigs"]:
             self.vaults_lock.acquire()
-            vault["cancel_tx"] = \
-                form_emergency_vault_tx(vault["cancel_tx"],
-                                        vault["pubkeys"],
-                                        vault["cancel_sigs"])
+            vault["cancel_tx"] = form_cancel_tx(vault["cancel_tx"],
+                                                vault["cancel_sigs"],
+                                                vault["pubkeys"],
+                                                self.server_pubkey)
             self.vaults_lock.release()
 
-    def update_unvault_revocations(self, vault):
-        """Don't stop polling the sig until we have all the revocation
-        transactions signatures. Then, send our signature for the unvault."""
-        self.update_unvault_emergency(vault)
-        self.update_cancel_emergency(vault)
-        # Ok, all revocations signed we can safely send the unvault sig.
-        if None not in vault["unvault_emer_sigs"] + vault["cancel_sigs"]:
-            self.vaults_lock.acquire()
-            vault["unvault_secure"] = True
-            self.vaults_lock.acquire()
-            # Who am I ?
-            stk_id = self.keychains.index(None) + 1
-            self.sigserver.send_signature(b2x(vault["unvault_tx"].GetTxid()),
-                                          vault["unvault_sig"], stk_id)
-            self.update_unvault_transaction(vault)
-
     def update_unvault_transaction(self, vault):
-        """"""
+        """Get others' sig for the unvault transaction"""
         txid = b2x(vault["unvault_tx"].GetTxid())
         while None in vault["unvault_sigs"] and \
                 not self.update_sigs_stop.wait(4.0):
@@ -465,14 +484,37 @@ class Vault:
                         self.sigserver.get_signature(txid, i)
                     self.vaults_lock.release()
         # Only populate the sigs if we got them all, not if we were stopped.
-        if None not in vault["unvault_sigs"]:
+        if None not in vault["unvault_sigs"] and not self.update_sigs_stop.wait(0.0):
             self.vaults_lock.acquire()
-            vault["unvault_tx"] = \
-                form_emergency_vault_tx(vault["cancel_tx"],
-                                        vault["pubkeys"],
-                                        vault["cancel_sigs"])
+            vault["unvault_tx"] = form_unvault_tx(vault["unvault_tx"],
+                                                  vault["pubkeys"],
+                                                  vault["unvault_sigs"])
             self.vaults_lock.release()
             vault["unvault_signed"] = True
+
+    def update_unvault_revocations(self, vault):
+        """Don't stop polling the sig until we have all the revocation
+        transactions signatures. Then, send our signature for the unvault."""
+        self.update_unvault_emergency(vault)
+        self.update_cancel_unvault(vault)
+        # Ok, all revocations signed we can safely send the unvault sig.
+        if None not in vault["unvault_emer_sigs"] + vault["cancel_sigs"]:
+            self.vaults_lock.acquire()
+            vault["unvault_secure"] = True
+            self.vaults_lock.release()
+            # We are about to send our commitment to the unvault, be sure to
+            # know if funds are spent to it !
+            assert len(vault["unvault_tx"].vout) == 1
+            unvault_addr = str(CBitcoinAddress.from_scriptPubKey(
+                vault["unvault_tx"].vout[0].scriptPubKey
+            ))
+            self.bitcoind.importaddress(unvault_addr, "unvault", False)
+            # Who am I ?
+            stk_id = self.keychains.index(None) + 1
+            self.sigserver.send_signature(b2x(vault["unvault_tx"].GetTxid()),
+                                          vault["unvault_sigs"][stk_id - 1],
+                                          stk_id)
+            self.update_unvault_transaction(vault)
 
     def update_all_signatures(self):
         """Poll the server for the signatures of all vaults' emergency tx."""

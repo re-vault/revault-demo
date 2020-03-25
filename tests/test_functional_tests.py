@@ -205,3 +205,27 @@ def test_vault_address_reuse(vault_factory):
         txid = bitcoind.sendrawtransaction(b2x(tx.serialize()))
         wait_for(lambda: txid in bitcoind.getrawmempool())
         bitcoind.generatetoaddress(1, bitcoind.getnewaddress())
+
+
+def test_tx_chain_sync(vault_factory):
+    """Test all vaults will exchange signatures for all transactions"""
+    vaults = vault_factory.get_vaults()
+    # FIXME: separate the Bitcoin backends !!
+    bitcoind = vaults[0].bitcoind
+    # Sending funds to any vault address will be remarked by anyone
+    for vault in vaults:
+        for _ in range(2):
+            txid = bitcoind.sendtoaddress(vault.getnewaddress(), 10)
+            wait_for(lambda: txid in bitcoind.getrawmempool())
+            bitcoind.generatetoaddress(1, bitcoind.getnewaddress())
+    wait_for(lambda: all(len(v.vaults) == 8 for v in vaults))
+    wait_for(lambda: all(v["emergency_signed"] for v in vault.vaults))
+    wait_for(lambda: all(v["unvault_signed"] for v in vault.vaults))
+    assert all(v["unvault_secure"] for v in vault.vaults)
+    # We can broadcast the unvault tx for any vault
+    vault = random.choice(vaults)
+    for v in vault.vaults:
+        txid = bitcoind.sendrawtransaction(b2x(v["unvault_tx"].serialize()))
+        wait_for(lambda: txid in bitcoind.getrawmempool())
+        bitcoind.generatetoaddress(1, bitcoind.getnewaddress())
+    wait_for(lambda: all(len(v.vaults) == 0 for v in vaults))
