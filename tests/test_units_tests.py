@@ -233,10 +233,10 @@ def test_cancel_unvault_tx(bitcoind):
     amount_cancel = amount_unvault - 500
     # We re-spend to the same vault
     CTx = create_cancel_tx(txid, 0, stk_pubkeys, amount_cancel)
-    # FIXME: Mimic each one signing..
-    sigs = sign_cancel_tx(CTx, stk_privkeys, stk_pubkeys,
-                          serv_pubkey, amount_unvault)
-    CTx = form_cancel_tx(CTx, sigs, stk_pubkeys, serv_pubkey)
+    sigs = [sign_cancel_tx(CTx, [p], stk_pubkeys, serv_pubkey,
+                           amount_unvault)[0]
+            for p in stk_privkeys]
+    CTx = form_cancel_tx(CTx, sigs[::-1], stk_pubkeys, serv_pubkey)
     bitcoind.send_tx(b2x(CTx.serialize()))
 
 
@@ -259,10 +259,10 @@ def test_emergency_unvault_tx(bitcoind):
     amount_emer = amount_unvault - 500
     # Actually vout MUST be 0.
     CTx = create_emer_unvault_tx(txid, 0, emer_pubkeys, amount_emer)
-    # FIXME: Mimic each stk signing...
-    sigs = sign_emer_unvault_tx(CTx, stk_privkeys, stk_pubkeys, serv_pubkey,
-                                amount_unvault)
-    CTx = form_emer_unvault_tx(CTx, sigs, stk_pubkeys, serv_pubkey)
+    sigs = [sign_emer_unvault_tx(CTx, [p], stk_pubkeys, serv_pubkey,
+                                 amount_unvault)[0]
+            for p in stk_privkeys]
+    CTx = form_emer_unvault_tx(CTx, sigs[::-1], stk_pubkeys, serv_pubkey)
     bitcoind.send_tx(b2x(CTx.serialize()))
 
 
