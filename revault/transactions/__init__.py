@@ -228,7 +228,7 @@ def sign_unvault_spend(tx, privkeys, pubkeys, pub_server, prev_value):
                             0, SIGHASH_ALL, prev_value,
                             SIGVERSION_WITNESS_V0)
     return [CKey(key).sign(tx_hash) + bytes([SIGHASH_ALL])
-            for key in privkeys[::-1]]
+            for key in privkeys]
 
 
 def form_unvault_spend(tx, sigs, pubkeys, pub_server):
@@ -244,7 +244,7 @@ def form_unvault_spend(tx, sigs, pubkeys, pub_server):
     """
     # Note that we use 4 sigs, but no CHECKMULTISIG, so no empty byte array at
     # the begining of this one!
-    witness_script = [*sigs, unvault_script(*pubkeys, pub_server)]
+    witness_script = [*sigs[::-1], unvault_script(*pubkeys, pub_server)]
     witness = CTxInWitness(CScriptWitness(witness_script))
     tx.wit = CTxWitness([witness])
     # Make it immutable

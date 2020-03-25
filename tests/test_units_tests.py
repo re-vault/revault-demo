@@ -236,7 +236,7 @@ def test_cancel_unvault_tx(bitcoind):
     sigs = [sign_cancel_tx(CTx, [p], stk_pubkeys, serv_pubkey,
                            amount_unvault)[0]
             for p in stk_privkeys]
-    CTx = form_cancel_tx(CTx, sigs[::-1], stk_pubkeys, serv_pubkey)
+    CTx = form_cancel_tx(CTx, sigs, stk_pubkeys, serv_pubkey)
     bitcoind.send_tx(b2x(CTx.serialize()))
 
 
@@ -262,7 +262,7 @@ def test_emergency_unvault_tx(bitcoind):
     sigs = [sign_emer_unvault_tx(CTx, [p], stk_pubkeys, serv_pubkey,
                                  amount_unvault)[0]
             for p in stk_privkeys]
-    CTx = form_emer_unvault_tx(CTx, sigs[::-1], stk_pubkeys, serv_pubkey)
+    CTx = form_emer_unvault_tx(CTx, sigs, stk_pubkeys, serv_pubkey)
     bitcoind.send_tx(b2x(CTx.serialize()))
 
 
