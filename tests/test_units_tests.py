@@ -15,11 +15,11 @@ from decimal import Decimal, getcontext
 from fixtures import *  # noqa: F401,F403
 from revault.transactions import (
     vault_txout, vault_script, unvault_txout, unvault_script,
-    create_and_sign_unvault_tx, form_unvault_tx,
-    create_and_sign_emergency_vault_tx, form_emergency_vault_tx,
-    create_cancel_tx, sign_cancel_tx, form_cancel_tx, create_emer_unvault_tx,
-    sign_emer_unvault_tx, form_emer_unvault_tx, create_spend_tx, sign_spend_tx,
-    form_spend_tx,
+    create_unvault_tx, sign_unvault_tx, form_unvault_tx,
+    create_emergency_vault_tx, sign_emergency_vault_tx,
+    form_emergency_vault_tx, create_cancel_tx, sign_cancel_tx, form_cancel_tx,
+    create_emer_unvault_tx, sign_emer_unvault_tx, form_emer_unvault_tx,
+    create_spend_tx, sign_spend_tx, form_spend_tx,
 )
 from revault.utils import empty_signature
 
@@ -147,7 +147,7 @@ def test_unvault_txout(bitcoind):
     assert bitcoind.has_utxo(addr)
 
 
-def create_vault_tx(bitcoind, pubkeys, amount):
+def send_vault_tx(bitcoind, pubkeys, amount):
     """Creates a vault transaction for {amount} *sats*"""
     txo = vault_txout(pubkeys, amount)
     addr = str(CBitcoinAddress.from_scriptPubKey(txo.scriptPubKey))
@@ -167,18 +167,17 @@ def test_unvault_tx(bitcoind):
     serv_pubkey = serv_privkey.pub
     # Create the transaction funding the vault
     amount = 50 * COIN - 500
-    vault_txid = lx(create_vault_tx(bitcoind, stk_pubkeys, amount))
+    vault_txid = lx(send_vault_tx(bitcoind, stk_pubkeys, amount))
     # Create the transaction spending from the vault
     amount_min_fees = amount - 500
+    unvtx = create_unvault_tx(vault_txid, 0, stk_pubkeys, serv_pubkey,
+                              amount_min_fees)
+    assert len(unvtx.vout) == 1
     # Simulate that each stakeholder sign the transaction separately
-    all_sigs = []
-    for k in stk_privkeys:
-        CMTx, sigs = create_and_sign_unvault_tx(vault_txid, 0, stk_pubkeys,
-                                                serv_pubkey, amount_min_fees,
-                                                amount, [k])
-        all_sigs += sigs
-    CTx = form_unvault_tx(CMTx, stk_pubkeys, all_sigs)
-    bitcoind.send_tx(b2x(CTx.serialize()))
+    sigs = [sign_unvault_tx(unvtx, stk_pubkeys, amount, [k])[0]
+            for k in stk_privkeys]
+    unvtx = form_unvault_tx(unvtx, stk_pubkeys, sigs)
+    bitcoind.send_tx(b2x(unvtx.serialize()))
 
 
 def test_emergency_vault_tx(bitcoind):
@@ -191,30 +190,27 @@ def test_emergency_vault_tx(bitcoind):
     emer_pubkeys = [CKey(k).pub for k in emer_privkeys]
     # Create the transaction funding the vault
     amount = 50 * COIN - 500
-    vault_txid = lx(create_vault_tx(bitcoind, stk_pubkeys, amount))
+    vault_txid = lx(send_vault_tx(bitcoind, stk_pubkeys, amount))
     # Create the emergency transaction spending from the vault
     amount_min_fees = amount - 500
+    emer_tx = create_emergency_vault_tx(vault_txid, 0, amount_min_fees,
+                                        emer_pubkeys)
     # Simulate that each stakeholder sign the transaction separately
-    all_sigs = []
-    for k in stk_privkeys:
-        CMTx, sigs = \
-            create_and_sign_emergency_vault_tx(vault_txid, 0, stk_pubkeys,
-                                               amount_min_fees, amount,
-                                               emer_pubkeys, [k])
-        all_sigs += sigs
-    CTx = form_emergency_vault_tx(CMTx, stk_pubkeys, all_sigs)
-    bitcoind.send_tx(b2x(CTx.serialize()))
+    sigs = [sign_emergency_vault_tx(emer_tx, stk_pubkeys, amount, [k])[0]
+            for k in stk_privkeys]
+    emer_tx = form_emergency_vault_tx(emer_tx, stk_pubkeys, sigs)
+    bitcoind.send_tx(b2x(emer_tx.serialize()))
 
 
-def create_unvault_tx(bitcoind, stk_privkeys, stk_pubkeys, serv_pubkey,
-                      amount_vault, amount_unvault):
-    vault_txid = lx(create_vault_tx(bitcoind, stk_pubkeys, amount_vault))
-    CMTx, sigs = create_and_sign_unvault_tx(vault_txid, 0, stk_pubkeys,
-                                            serv_pubkey, amount_unvault,
-                                            amount_vault, stk_privkeys)
-    CTx = form_unvault_tx(CMTx, stk_pubkeys, sigs)
-    bitcoind.send_tx(b2x(CTx.serialize()))
-    return CTx.GetTxid()
+def send_unvault_tx(bitcoind, stk_privkeys, stk_pubkeys, serv_pubkey,
+                    amount_vault, amount_unvault):
+    vault_txid = lx(send_vault_tx(bitcoind, stk_pubkeys, amount_vault))
+    unvtx = create_unvault_tx(vault_txid, 0, stk_pubkeys, serv_pubkey,
+                              amount_unvault)
+    sigs = sign_unvault_tx(unvtx, stk_pubkeys, amount_vault, stk_privkeys)
+    unvtx = form_unvault_tx(unvtx, stk_pubkeys, sigs)
+    bitcoind.send_tx(b2x(unvtx.serialize()))
+    return unvtx.GetTxid()
 
 
 def test_cancel_unvault_tx(bitcoind):
@@ -228,8 +224,8 @@ def test_cancel_unvault_tx(bitcoind):
     # Create the vault and unvault transactions
     amount_vault = 50 * COIN - 500
     amount_unvault = amount_vault - 500
-    txid = create_unvault_tx(bitcoind, stk_privkeys, stk_pubkeys, serv_pubkey,
-                             amount_vault, amount_unvault)
+    txid = send_unvault_tx(bitcoind, stk_privkeys, stk_pubkeys, serv_pubkey,
+                           amount_vault, amount_unvault)
     amount_cancel = amount_unvault - 500
     # We re-spend to the same vault
     CTx = create_cancel_tx(txid, 0, stk_pubkeys, amount_cancel)
@@ -254,8 +250,8 @@ def test_emergency_unvault_tx(bitcoind):
     # Create the vault and unvault transactions
     amount_vault = 50 * COIN - 500
     amount_unvault = amount_vault - 500
-    txid = create_unvault_tx(bitcoind, stk_privkeys, stk_pubkeys, serv_pubkey,
-                             amount_vault, amount_unvault)
+    txid = send_unvault_tx(bitcoind, stk_privkeys, stk_pubkeys, serv_pubkey,
+                           amount_vault, amount_unvault)
     amount_emer = amount_unvault - 500
     # Actually vout MUST be 0.
     CTx = create_emer_unvault_tx(txid, 0, emer_pubkeys, amount_emer)
@@ -279,8 +275,8 @@ def test_spend_unvault_tx_two_traders(bitcoind):
     # Create the vault and unvault transactions
     amount_vault = 50 * COIN - 500
     amount_unvault = amount_vault - 500
-    txid = create_unvault_tx(bitcoind, stk_privkeys, stk_pubkeys, serv_pubkey,
-                             amount_vault, amount_unvault)
+    txid = send_unvault_tx(bitcoind, stk_privkeys, stk_pubkeys, serv_pubkey,
+                           amount_vault, amount_unvault)
     amount_spend = amount_unvault - 500
     # The address to spend to
     addr = bitcoind.getnewaddress()
@@ -317,8 +313,8 @@ def test_spend_unvault_tx_trader_second_trader(bitcoind):
     # Create the vault and unvault transactions
     amount_vault = 50 * COIN - 500
     amount_unvault = amount_vault - 500
-    txid = create_unvault_tx(bitcoind, stk_privkeys, stk_pubkeys, serv_pubkey,
-                             amount_vault, amount_unvault)
+    txid = send_unvault_tx(bitcoind, stk_privkeys, stk_pubkeys, serv_pubkey,
+                           amount_vault, amount_unvault)
     amount_spend = amount_unvault - 500
     # The address to spend to
     addr = bitcoind.getnewaddress()
@@ -355,8 +351,8 @@ def test_spend_unvault_tx_trader_A(bitcoind):
     # Create the vault and unvault transactions
     amount_vault = 50 * COIN - 500
     amount_unvault = amount_vault - 500
-    txid = create_unvault_tx(bitcoind, stk_privkeys, stk_pubkeys, serv_pubkey,
-                             amount_vault, amount_unvault)
+    txid = send_unvault_tx(bitcoind, stk_privkeys, stk_pubkeys, serv_pubkey,
+                           amount_vault, amount_unvault)
     amount_spend = amount_unvault - 500
 
     # The address to spend to

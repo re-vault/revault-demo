@@ -9,10 +9,11 @@ from decimal import Decimal, getcontext
 from .bitcoindapi import BitcoindApi
 from .serverapi import ServerApi
 from .transactions import (
-    vault_txout, emergency_txout, create_and_sign_emergency_vault_tx,
-    form_emergency_vault_tx, get_transaction_size, create_and_sign_unvault_tx,
-    form_unvault_tx, create_cancel_tx, sign_cancel_tx, form_cancel_tx,
-    create_emer_unvault_tx, sign_emer_unvault_tx, form_emer_unvault_tx
+    vault_txout, emergency_txout, create_emergency_vault_tx,
+    sign_emergency_vault_tx, form_emergency_vault_tx, create_unvault_tx,
+    sign_unvault_tx, form_unvault_tx, create_cancel_tx, sign_cancel_tx,
+    form_cancel_tx, create_emer_unvault_tx, sign_emer_unvault_tx,
+    form_emer_unvault_tx, get_transaction_size,
 )
 
 
@@ -201,43 +202,35 @@ class Vault:
         """Create and return our signature for the vault emergency tx."""
         # Dummy amount to get the feerate..
         amount = bitcoin.core.COIN
-        # FIXME: This interface is ugly
-        dummy_tx, _ = \
-            create_and_sign_emergency_vault_tx(lx(vault["txid"]),
-                                               vault["vout"], vault["pubkeys"],
-                                               amount, vault["amount"],
-                                               self.emergency_pubkeys, [])
+        dummy_tx = create_emergency_vault_tx(lx(vault["txid"]), vault["vout"],
+                                             amount, self.emergency_pubkeys)
         tx_size = get_transaction_size(dummy_tx)
         feerate = self.sigserver.get_feerate("emergency",
                                              b2x(dummy_tx.GetTxid()))
         fees = feerate * tx_size
         amount = vault["amount"] - fees
-        vault["emergency_tx"], sigs = \
-            create_and_sign_emergency_vault_tx(lx(vault["txid"]),
-                                               vault["vout"], vault["pubkeys"],
-                                               amount, vault["amount"],
-                                               self.emergency_pubkeys,
-                                               [vault["privkey"]])
-        return sigs[0]
+        vault["emergency_tx"] = \
+            create_emergency_vault_tx(lx(vault["txid"]), vault["vout"],
+                                      amount, self.emergency_pubkeys)
+        return sign_emergency_vault_tx(vault["emergency_tx"], vault["pubkeys"],
+                                       vault["amount"], [vault["privkey"]])[0]
 
     def create_sign_unvault(self, vault):
         """Create and return our signature for the unvault tx."""
-        # Dummy amount to get the feerate..
         dummy_amount = bitcoin.core.COIN
-        dumtx, _ = create_and_sign_unvault_tx(lx(vault["txid"]), vault["vout"],
-                                              vault["pubkeys"],
-                                              self.server_pubkey, dummy_amount,
-                                              vault["amount"], [])
-        tx_size = get_transaction_size(dumtx)
-        feerate = self.sigserver.get_feerate("cancel", b2x(dumtx.GetTxid()))
+        dummy_tx = create_unvault_tx(lx(vault["txid"]), vault["vout"],
+                                     vault["pubkeys"], self.server_pubkey,
+                                     dummy_amount)
+        tx_size = get_transaction_size(dummy_tx)
+        feerate = self.sigserver.get_feerate("cancel", b2x(dummy_tx.GetTxid()))
         unvault_amount = vault["amount"] - feerate * tx_size
-        # FIXME: This interface is ugly
-        vault["unvault_tx"], unvtx_sigs = \
-            create_and_sign_unvault_tx(lx(vault["txid"]), vault["vout"],
-                                       vault["pubkeys"], self.server_pubkey,
-                                       unvault_amount, vault["amount"],
-                                       [vault["privkey"]])
-        return unvtx_sigs[0]
+        # We reuse the vault pubkeys for the unvault script
+        vault["unvault_tx"] = \
+            create_unvault_tx(lx(vault["txid"]), vault["vout"],
+                              vault["pubkeys"], self.server_pubkey,
+                              unvault_amount)
+        return sign_unvault_tx(vault["unvault_tx"], vault["pubkeys"],
+                               vault["amount"], [vault["privkey"]])[0]
 
     def create_sign_cancel(self, vault):
         """Create and return our signature for the unvault cancel tx."""
