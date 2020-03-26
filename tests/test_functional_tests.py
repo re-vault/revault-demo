@@ -169,42 +169,16 @@ def test_vault_address_reuse(vault_factory):
     bitcoind = vaults[0].bitcoind
     vault = random.choice(vaults)
     address = vault.getnewaddress()
-    # First send
-    txid = bitcoind.sendtoaddress(address, 10)
-    wait_for(lambda: txid in bitcoind.getrawmempool())
-    bitcoind.generatetoaddress(1, bitcoind.getnewaddress())
-    wait_for(lambda: len(vault.vaults) == 1)
-    wait_for(lambda: vault.vaults[0]["emergency_signed"])
-    # Broadcast the emergency transaction, nothing left in the vault
-    tx = vault.vaults[0]["emergency_tx"]
-    txid = bitcoind.sendrawtransaction(b2x(tx.serialize()))
-    wait_for(lambda: txid in bitcoind.getrawmempool())
-    bitcoind.generatetoaddress(1, bitcoind.getnewaddress())
-    wait_for(lambda: len(vault.vaults) == 0)
-    # Second send
-    txid = bitcoind.sendtoaddress(address, 12)
-    wait_for(lambda: txid in bitcoind.getrawmempool())
-    bitcoind.generatetoaddress(1, bitcoind.getnewaddress())
-    wait_for(lambda: len(vault.vaults) == 1)
-    wait_for(lambda: all(v["emergency_signed"] for v in vault.vaults))
-    # We should still be able to broadcast the emergency tx !
-    tx = vault.vaults[0]["emergency_tx"]
-    txid = bitcoind.sendrawtransaction(b2x(tx.serialize()))
-    wait_for(lambda: txid in bitcoind.getrawmempool())
-    bitcoind.generatetoaddress(1, bitcoind.getnewaddress())
-    wait_for(lambda: len(vault.vaults) == 0)
-    # If two outputs to the same address are created before we spend one of
-    # them, we should still be fine.
-    for _ in range(2):
+    # Concurrent send to the same address should be fine
+    for _ in range(5):
         txid = bitcoind.sendtoaddress(address, 12)
         wait_for(lambda: txid in bitcoind.getrawmempool())
         bitcoind.generatetoaddress(1, bitcoind.getnewaddress())
-    wait_for(lambda: len(vault.vaults) == 2)
-    wait_for(lambda: all(v["emergency_signed"] for v in vault.vaults))
-    for tx in [v["emergency_tx"] for v in vault.vaults[2:]]:
-        txid = bitcoind.sendrawtransaction(b2x(tx.serialize()))
-        wait_for(lambda: txid in bitcoind.getrawmempool())
-        bitcoind.generatetoaddress(1, bitcoind.getnewaddress())
+    wait_for(lambda: len(vault.vaults) == 5)
+    for vault in vaults:
+        wait_for(lambda: all(v["emergency_signed"] and v["unvault_signed"]
+                             and v["unvault_secure"] for v in vault.vaults))
+    # FIXME: When spend is implemented test address reuse after spend
 
 
 def test_tx_chain_sync(vault_factory):
