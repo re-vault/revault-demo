@@ -20,5 +20,5 @@ start_regtest
 # Start the servers (the signature one and cosigning one)
 . tests/start_sigserver $PWD/regtest/bcdir1/bitcoin.conf
 # Run the test suite
-pytest -vvv tests/ -n6
+pytest -vvv tests/ -n4
 ```

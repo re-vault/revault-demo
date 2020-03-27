@@ -27,7 +27,8 @@ class Vault:
     vault.
     """
     def __init__(self, xpriv, xpubs, emergency_pubkeys, bitcoin_conf_path,
-                 cosigning_url, sigserver_url, current_index=0, birthdate=None):
+                 cosigning_url, sigserver_url, current_index=0,
+                 birthdate=None):
         """
         We need the xpub of all the other stakeholders to derive their pubkeys.
 
@@ -77,36 +78,20 @@ class Vault:
         self.emergency_address = str(CBitcoinAddress
                                      .from_scriptPubKey(txo.scriptPubKey))
 
-        # The cosigning server
-        if cosigning_url.endswith('/'):
-            self.cosigner = CosigningApi(cosigning_url[:-1])
-        else:
-            self.cosigner = CosigningApi(cosigning_url)
+        # The cosigning server, asked for its signature for the spend_tx
+        self.cosigner = CosigningApi(cosigning_url)
         self.server_pubkey = self.cosigner.get_pubkey()
 
-        # The everything-server, allowing us to stay in sync
-        if sigserver_url.endswith('/'):
-            self.sigserver = ServerApi(sigserver_url[:-1])
-        else:
-            self.sigserver = ServerApi(sigserver_url)
+        # The "sig" server, used to store and exchange signatures between
+        # vaults and which provides us a feerate.
+        self.sigserver = ServerApi(sigserver_url)
 
-        self.watched_addresses = []
+        self.vault_addresses = []
         self.update_watched_addresses()
 
-        # We keep track of each vault, represented as
-        # {
-        # FIXME: Add missing fields
-        #   "txid": "hex",
-        #   "vout": n,
-        #   "amount": n,
-        #   "pubkeys": [pk1, pk2, pk3, pk4],
-        #   "emergency_tx": CTransaction,
-        #   "emergency_signed": bool,
-        #   "unvaul_tx": CTransaction or None,
-        #   "unvault_cancel_tx": CTransaction or None,
-        #   "unvault_emergency_tx": CTransaction or None,
-        # }
-        # The amount is in satoshis.
+        # We keep track of each vault, see below when we fill it for details
+        # about what it contains. Basically all the transactions, the
+        # signatures and some useful fields (like "are all txs signed ?").
         self.vaults = []
         self.vaults_lock = threading.Lock()
 
@@ -118,6 +103,7 @@ class Vault:
         self.poller = threading.Thread(target=self.poll_for_funds)
         self.poller.start()
 
+        # Don't start polling for signatures just yet, we don't have any vault!
         self.update_sigs_stop = threading.Event()
         self.update_sigs_thread =\
             threading.Thread(target=self.update_all_signatures)
@@ -133,6 +119,7 @@ class Vault:
         self.poller_stop.set()
         self.poller.join()
         self.bitcoind.close()
+
         # Stop the thread updating emergency transactions
         self.update_sigs_stop.set()
         if self.update_sigs_thread is not None:
@@ -165,13 +152,14 @@ class Vault:
 
     def update_watched_addresses(self):
         """Update the watchonly addresses"""
-        # FIXME: ugly
+        # Which addresses should we look for when polling bitcoind ?
         for i in range(self.current_index, self.max_index):
             pubkeys = self.get_pubkeys(i)
             txo = vault_txout(pubkeys, 0)
             addr = str(CBitcoinAddress.from_scriptPubKey(txo.scriptPubKey))
-            if addr not in self.watched_addresses:
-                self.watched_addresses.append(addr)
+            if addr not in self.vault_addresses:
+                self.vault_addresses.append(addr)
+        # Which addresses should bitcoind look for when polling the utxo set ?
         self.bitcoind.importmultiextended(self.all_xpubs, self.birthdate,
                                           self.current_index, self.max_index)
 
@@ -288,27 +276,37 @@ class Vault:
             "vout": output["vout"],
             # This amount is in BTC, we want sats
             "amount": int(Decimal(output["amount"]) * Decimal(COIN)),
+            # The four pubkeys used in this vault
             "pubkeys": [],
             # For convenience
             "privkey": None,
             "address": output["address"],
+            # The first emergency transaction
             "emergency_tx": None,
-            # Avoid asking them multiple times
+            # We store the signatures for each transactions as otherwise we
+            # would ask all of them to the sig server each time the polling
+            # thread is restarted
             "emergency_sigs": [None, None, None, None],
+            # More convenient and readable than checking the transaction
             "emergency_signed": False,
+            # The unvault transaction, broadcasted to use the spend_tx
             "unvault_tx": None,
             "unvault_sigs": [None, None, None, None],
             "unvault_signed": False,
+            # The cancel, which reverts an unvault
             "cancel_tx": None,
             "cancel_sigs": [None, None, None, None],
+            # Something went bad, but we are in the middle of an unvault,
+            # broadcast this.
             "unvault_emer_tx": None,
             "unvault_emer_sigs": [None, None, None, None],
-            # Are cancel and emer signed ?
+            # Are cancel and emer signed ? If so we can commit to the unvault.
             "unvault_secure": False,
         }
         index = self.guess_index(vault["address"])
         vault["pubkeys"] = self.get_pubkeys(index)
         vault["privkey"] = self.our_bip32.get_privkey_from_path([index])
+
         emer_sig = self.create_sign_emergency(vault)
         # Keep it for later
         vault["unvault_sigs"][self.keychains.index(None)] = \
@@ -344,8 +342,7 @@ class Vault:
         to fetch emergency transactions signatures.
         """
         while not self.poller_stop.wait(5.0):
-            # FIXME wtf: For some reasons this messes up the last list !!
-            # known_outputs, unvault_addresses, new_vault_utxos = ([],) * 3
+            # FIXME: why cannot it be initialized like ([], ) * 4 ?
             known_outputs = []
             unvault_addresses = []
             cancel_addresses = []
@@ -364,17 +361,18 @@ class Vault:
                 )
 
             for utxo in self.bitcoind.listunspent():
-                if utxo["address"] in self.watched_addresses \
+                if utxo["address"] in self.vault_addresses \
                         and utxo["txid"] not in known_outputs:
                     new_vault_utxos.append(utxo)
                 elif utxo["address"] == self.emergency_address:
-                    # FIXME: Should we put up the red lights here ?
+                    # FIXME: We should broadcast all our emergency transactions
+                    # and die here.
                     self.vaults_lock.acquire()
                     self.remove_vault(utxo)
                     self.vaults_lock.release()
                 elif utxo["address"] in unvault_addresses:
                     # FIXME: Broadcast the cancel if we don't know about the
-                    # spend
+                    # spend.
                     self.vaults_lock.acquire()
                     self.remove_vault(utxo)
                     self.vaults_lock.release()
@@ -392,15 +390,14 @@ class Vault:
                     self.update_watched_addresses()
 
             if len(new_vault_utxos) > 0:
-                # Ok we updated our owned outputs, restart the emergency
-                # transactions gathering with the updated vaults list
+                # Ok we updated our owned outputs, restart the transactions
+                # signatures fetcher with the updated list of vaults.
                 self.update_sigs_stop.set()
-                if self.update_sigs_thread is not None:
-                    try:
-                        self.update_sigs_thread.join()
-                    except RuntimeError:
-                        # Already dead
-                        pass
+                try:
+                    self.update_sigs_thread.join()
+                except RuntimeError:
+                    # Already dead
+                    pass
                 self.update_sigs_stop.clear()
                 del self.update_sigs_thread
                 self.update_sigs_thread = \
@@ -414,8 +411,9 @@ class Vault:
                 emergency signatures for.
         """
         txid = b2x(vault["emergency_tx"].GetTxid())
-        while None in vault["emergency_sigs"] and \
-                not self.update_sigs_stop.wait(4.0):
+        # Poll until finished, or master tells us to stop
+        while None in vault["emergency_sigs"] \
+                and not self.update_sigs_stop.wait(2.0):
             for i in range(1, 5):
                 if vault["emergency_sigs"][i - 1] is None:
                     self.vaults_lock.acquire()
@@ -424,20 +422,22 @@ class Vault:
                     self.vaults_lock.release()
         # Only populate the sigs if we got them all, not if master told us to
         # stop.
-        if None not in vault["emergency_sigs"]:
+        if not self.update_sigs_stop.wait(0.0):
             self.vaults_lock.acquire()
             vault["emergency_tx"] = \
                 form_emergency_vault_tx(vault["emergency_tx"],
                                         vault["pubkeys"],
                                         vault["emergency_sigs"])
+            # FIXME: use testmempoolaccept here
             vault["emergency_signed"] = True
-            # FIXME: is deleting sigs from the struct here over optimization ?
             self.vaults_lock.release()
 
     def update_unvault_emergency(self, vault):
+        """Poll the signature server for the unvault_emergency tx signature"""
         txid = b2x(vault["unvault_emer_tx"].GetTxid())
+        # Poll until finished, or master tells us to stop
         while None in vault["unvault_emer_sigs"] and \
-                not self.update_sigs_stop.wait(4.0):
+                not self.update_sigs_stop.wait(2.0):
             for i in range(1, 5):
                 if vault["unvault_emer_sigs"][i - 1] is None:
                     self.vaults_lock.acquire()
@@ -445,19 +445,22 @@ class Vault:
                         self.sigserver.get_signature(txid, i)
                     self.vaults_lock.release()
         # Only populate the sigs if we got them all, not if we were stopped.
-        if None not in vault["unvault_emer_sigs"]:
+        if not self.update_sigs_stop.wait(0.0):
             self.vaults_lock.acquire()
             vault["unvault_emer_tx"] = \
                 form_emer_unvault_tx(vault["unvault_emer_tx"],
                                      vault["unvault_emer_sigs"],
                                      vault["pubkeys"],
                                      self.server_pubkey)
+            # FIXME: use testmempoolaccept here
             self.vaults_lock.release()
 
     def update_cancel_unvault(self, vault):
+        """Poll the signature server for the cancel_unvault tx signature"""
         txid = b2x(vault["cancel_tx"].GetTxid())
+        # Poll until finished, or master tells us to stop
         while None in vault["cancel_sigs"] and \
-                not self.update_sigs_stop.wait(4.0):
+                not self.update_sigs_stop.wait(2.0):
             for i in range(1, 5):
                 if vault["cancel_sigs"][i - 1] is None:
                     self.vaults_lock.acquire()
@@ -465,19 +468,21 @@ class Vault:
                         self.sigserver.get_signature(txid, i)
                     self.vaults_lock.release()
         # Only populate the sigs if we got them all, not if we were stopped.
-        if None not in vault["cancel_sigs"]:
+        if not self.update_sigs_stop.wait(0.0):
             self.vaults_lock.acquire()
             vault["cancel_tx"] = form_cancel_tx(vault["cancel_tx"],
                                                 vault["cancel_sigs"],
                                                 vault["pubkeys"],
                                                 self.server_pubkey)
+            # FIXME: use testmempoolaccept here
             self.vaults_lock.release()
 
     def update_unvault_transaction(self, vault):
         """Get others' sig for the unvault transaction"""
         txid = b2x(vault["unvault_tx"].GetTxid())
+        # Poll until finished, or master tells us to stop
         while None in vault["unvault_sigs"] and \
-                not self.update_sigs_stop.wait(4.0):
+                not self.update_sigs_stop.wait(2.0):
             for i in range(1, 5):
                 if vault["unvault_sigs"][i - 1] is None:
                     self.vaults_lock.acquire()
@@ -485,16 +490,17 @@ class Vault:
                         self.sigserver.get_signature(txid, i)
                     self.vaults_lock.release()
         # Only populate the sigs if we got them all, not if we were stopped.
-        if None not in vault["unvault_sigs"] and not self.update_sigs_stop.wait(0.0):
+        if not self.update_sigs_stop.wait(0.0):
             self.vaults_lock.acquire()
             vault["unvault_tx"] = form_unvault_tx(vault["unvault_tx"],
                                                   vault["pubkeys"],
                                                   vault["unvault_sigs"])
-            self.vaults_lock.release()
+            # FIXME: use testmempoolaccept here
             vault["unvault_signed"] = True
+            self.vaults_lock.release()
 
     def update_unvault_revocations(self, vault):
-        """Don't stop polling the sig until we have all the revocation
+        """Don't stop polling the sig server until we have all the revocation
         transactions signatures. Then, send our signature for the unvault."""
         self.update_unvault_emergency(vault)
         self.update_cancel_unvault(vault)
@@ -518,11 +524,11 @@ class Vault:
             self.update_unvault_transaction(vault)
 
     def update_all_signatures(self):
-        """Poll the server for the signatures of all vaults' emergency tx."""
-        if self.update_sigs_stop.wait(0.0):
-            return
+        """Poll the server for the signatures of all transactions."""
         threads = []
         for vault in self.vaults:
+            if self.update_sigs_stop.wait(0.0):
+                return
             if not vault["emergency_signed"]:
                 t = threading.Thread(
                     target=self.update_emergency_signatures, args=[vault]
@@ -539,5 +545,6 @@ class Vault:
                     target=self.update_unvault_transaction, args=[vault]
                 )
                 t.start()
+
         while len(threads) > 0:
             threads.pop().join()
