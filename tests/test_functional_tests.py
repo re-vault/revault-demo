@@ -5,12 +5,14 @@ import unittest
 from bip32 import BIP32
 from bitcoin.core import b2x
 from fixtures import *  # noqa: F401,F403
-from utils import SIGSERV_URL, wait_for
+from utils import SIGSERV_URL, COSIGNER_URL, wait_for
 
 
 bitcoin.SelectParams("regtest")
 
 
+@unittest.skipIf("" in [SIGSERV_URL, COSIGNER_URL],
+                 "We need the servers for the vaults to operate")
 def test_vault_address(vault_factory):
     vaults = vault_factory.get_vaults()
     # FIXME: separate the Bitcoin backends !!
@@ -47,8 +49,8 @@ def test_sigserver(bitcoind, sigserv):
     assert r.json == {"sig": sig}
 
 
-@unittest.skipIf(SIGSERV_URL == "", "We want to test against a running Flask"
-                                    " instance, not test_client()")
+@unittest.skipIf("" in [SIGSERV_URL, COSIGNER_URL],
+                 "We need the servers for the vaults to operate")
 def test_sigserver_feerate(vault_factory):
     """We just test that it gives us a (valid) feerate."""
     # FIXME: Test that it sends the same feerate with same txid
@@ -59,8 +61,8 @@ def test_sigserver_feerate(vault_factory):
     assert feerate >= 1
 
 
-@unittest.skipIf(SIGSERV_URL == "", "We want to test against a running Flask"
-                                    " instance, not test_client()")
+@unittest.skipIf("" in [SIGSERV_URL, COSIGNER_URL],
+                 "We need the servers for the vaults to operate")
 def test_signatures_posting(vault_factory):
     """Test that we can send signatures to the sig server."""
     vault = vault_factory.get_vaults()[0]
@@ -69,8 +71,8 @@ def test_signatures_posting(vault_factory):
     vault.sigserver.send_signature("00af", "aa56", stk_id)
 
 
-@unittest.skipIf(SIGSERV_URL == "", "We want to test against a running Flask"
-                                    " instance, not test_client()")
+@unittest.skipIf("" in [SIGSERV_URL, COSIGNER_URL],
+                 "We need the servers for the vaults to operate")
 def test_funds_polling(vault_factory):
     """Test that we are aware of the funds we receive."""
     vault = vault_factory.get_vaults()[0]
@@ -89,8 +91,8 @@ def test_funds_polling(vault_factory):
     wait_for(lambda: len(vault.vaults) == 5)
 
 
-@unittest.skipIf(SIGSERV_URL == "", "We want to test against a running Flask"
-                                    " instance, not test_client()")
+@unittest.skipIf("" in [SIGSERV_URL, COSIGNER_URL],
+                 "We need the servers for the vaults to operate")
 def test_emergency_sig_sharing(vault_factory):
     """Test that we share the emergency transaction signature."""
     vault = vault_factory.get_vaults()[0]
@@ -105,8 +107,8 @@ def test_emergency_sig_sharing(vault_factory):
     wait_for(lambda: len(vault.vaults[0]["emergency_sigs"]) > 0)
 
 
-@unittest.skipIf(SIGSERV_URL == "", "We want to test against a running Flask"
-                                    " instance, not test_client()")
+@unittest.skipIf("" in [SIGSERV_URL, COSIGNER_URL],
+                 "We need the servers for the vaults to operate")
 def test_emergency_tx_sync(vault_factory):
     """Test that we correctly share and gather emergency transactions
     signatures."""
@@ -128,8 +130,8 @@ def test_emergency_tx_sync(vault_factory):
             assert tx == second_emer_txs[first_emer_txs.index(tx)]
 
 
-@unittest.skipIf(SIGSERV_URL == "", "We want to test against a running Flask"
-                                    " instance, not test_client()")
+@unittest.skipIf("" in [SIGSERV_URL, COSIGNER_URL],
+                 "We need the servers for the vaults to operate")
 def test_emergency_broadcast(vault_factory):
     """Test that all the emergency transactions we create are valid and can be
     broadcast."""
@@ -147,8 +149,8 @@ def test_emergency_broadcast(vault_factory):
     wait_for(lambda: len(vault.vaults) == 0)
 
 
-@unittest.skipIf(SIGSERV_URL == "", "We want to test against a running Flask"
-                                    " instance, not test_client()")
+@unittest.skipIf("" in [SIGSERV_URL, COSIGNER_URL],
+                 "We need the servers for the vaults to operate")
 def test_vault_address_reuse(vault_factory):
     """Test that we are still safe if coins are sent to an already used vault.
     """
@@ -167,6 +169,8 @@ def test_vault_address_reuse(vault_factory):
     # FIXME: When spend is implemented test address reuse after spend
 
 
+@unittest.skipIf("" in [SIGSERV_URL, COSIGNER_URL],
+                 "We need the servers for the vaults to operate")
 def test_tx_chain_sync(vault_factory):
     """Test all vaults will exchange signatures for all transactions"""
     vaults = vault_factory.get_vaults()
@@ -187,6 +191,8 @@ def test_tx_chain_sync(vault_factory):
     wait_for(lambda: all(len(v.vaults) == 0 for v in vaults))
 
 
+@unittest.skipIf("" in [SIGSERV_URL, COSIGNER_URL],
+                 "We need the servers for the vaults to operate")
 def test_cancel_unvault(vault_factory):
     """Test the unvault cancelation (cancel_tx *AND* emer_unvault_tx)"""
     vaults = vault_factory.get_vaults()

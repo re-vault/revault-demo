@@ -25,6 +25,7 @@ BITCOIND_CONFIG = {
 
 
 TIMEOUT = int(os.getenv("TIMEOUT", 60))
+COSIGNER_URL = os.getenv("COSIGNER_URL", "")
 SIGSERV_URL = os.getenv("SIGSERV_URL", "")
 
 
@@ -412,12 +413,10 @@ class VaultFactory:
         self.bitcoind = bitcoind
         self.vaults = []
 
-    def get_vaults(self, server_privkey=None, emergency_privkeys=None):
+    def get_vaults(self, emergency_privkeys=None):
         """Get 4 vaults, one for each stakeholder."""
         bip32s = [BIP32.from_seed(os.urandom(32), "test") for _ in range(4)]
         xpubs = [bip32.get_master_xpub() for bip32 in bip32s]
-        if server_privkey is None:
-            server_privkey = CKey(os.urandom(32))
         if emergency_privkeys is None:
             emergency_privkeys = [CKey(os.urandom(32)) for _ in range(4)]
         emergency_pubkeys = [k.pub for k in emergency_privkeys]
@@ -425,6 +424,7 @@ class VaultFactory:
         for bip32 in bip32s:
             xpriv = bip32.get_master_xpriv()
             conf = self.bitcoind.rpc.__btc_conf_file__
-            self.vaults.append(Vault(xpriv, xpubs, server_privkey.pub,
-                                     emergency_pubkeys, conf, SIGSERV_URL))
+            # FIXME: No we cant test without servers anymore..
+            self.vaults.append(Vault(xpriv, xpubs, emergency_pubkeys, conf,
+                                     COSIGNER_URL, SIGSERV_URL))
         return self.vaults

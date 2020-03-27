@@ -16,5 +16,8 @@ if __name__ == "__main__":
 
     conf_path = os.path.abspath(sys.argv[1])
     sigserver = revault.SigServer(bitcoind_conf_path=conf_path)
-    host, port = sys.argv[2].split(':') if len(sys.argv) > 2 else (None, None)
+    if len(sys.argv) > 2:
+        host, port = sys.argv[2].split('//')[-1].split(':')
+    else:
+        host, port = (None, None)
     sigserver.run(host=host, port=port, debug=True)

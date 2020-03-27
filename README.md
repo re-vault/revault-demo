@@ -15,16 +15,10 @@ pip install -r requirements.txt
 python3 setup.py install
 # Install the tests dependencies
 pip install -r tests/requirements.txt
-pytest -vvv tests/ -n4
-```
-
-Some tests need a non-pytest-fixture Flask instance and will be skipped by the
-above command, to run them:
-```
-# Start regtest, say the 5th bitcoind is the serv's bitcoind
-start_regtest 5
-# Start the signature server
-. tests/start_sigserver regtest/bcdir5/bitcoin.conf
+# Start regtest, the signature server provides the feerate and needs a bitcoind
+start_regtest
+# Start the servers (the signature one and cosigning one)
+. tests/start_sigserver $PWD/regtest/bcdir1/bitcoin.conf
 # Run the test suite
 pytest -vvv tests/ -n6
 ```
