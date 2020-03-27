@@ -1,5 +1,6 @@
 import bitcoin.rpc
 import threading
+import time
 
 
 class BitcoindApi:
@@ -121,3 +122,23 @@ class BitcoindApi:
         self.bitcoind_lock.acquire()
         self.bitcoind.importaddress(address, label, rescan)
         self.bitcoind_lock.release()
+
+    def broadcast_and_mine(self, tx):
+        """A routine used in the tests"""
+        self.bitcoind_lock.acquire()
+        txid = self.bitcoind.sendrawtransaction(tx)
+        while txid not in self.bitcoind.getrawmempool():
+            time.sleep(0.1)
+        self.bitcoind.generatetoaddress(1, self.bitcoind.getnewaddress())
+        self.bitcoind_lock.release()
+        return txid
+
+    def pay_to(self, address, amount):
+        """A helper for the functional tests.."""
+        self.bitcoind_lock.acquire()
+        txid = self.bitcoind.sendtoaddress(address, amount)
+        while txid not in self.bitcoind.getrawmempool():
+            time.sleep(0.1)
+        self.bitcoind.generatetoaddress(1, self.bitcoind.getnewaddress())
+        self.bitcoind_lock.release()
+        return txid
