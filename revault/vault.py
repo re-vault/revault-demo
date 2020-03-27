@@ -7,6 +7,7 @@ from bitcoin.core import b2x, lx, COIN
 from bitcoin.wallet import CBitcoinAddress
 from decimal import Decimal, getcontext
 from .bitcoindapi import BitcoindApi
+from .cosigningapi import CosigningApi
 from .serverapi import ServerApi
 from .transactions import (
     vault_txout, emergency_txout, create_emergency_vault_tx,
@@ -25,9 +26,8 @@ class Vault:
     Builds and signs all the necessary transactions when spending from the
     vault.
     """
-    def __init__(self, xpriv, xpubs, server_pubkey, emergency_pubkeys,
-                 bitcoin_conf_path, sigserver_url, current_index=0,
-                 birthdate=None):
+    def __init__(self, xpriv, xpubs, emergency_pubkeys, bitcoin_conf_path,
+                 cosigning_url, sigserver_url, current_index=0, birthdate=None):
         """
         We need the xpub of all the other stakeholders to derive their pubkeys.
 
@@ -37,10 +37,10 @@ class Vault:
                       the following order: 1) first trader 2) second trader
                       3) first "normie" stakeholder 4) second "normie"
                       stakeholder.
-        :param server_pubkey: The public key of the co-signing server.
         :param emergency_pubkeys: A list of the four offline keys of the
                                   stakeholders, as bytes.
         :param bitcoin_conf_path: Path to bitcoin.conf.
+        :param cosigning_url: The url of the cosigning server.
         :param sigserver_url: The url of the server to post / get the sigs from
                               other stakeholders.
         :param birthdate: The timestamp at which this wallet has been created.
@@ -55,7 +55,6 @@ class Vault:
             else:
                 self.keychains.append(None)
         self.all_xpubs = xpubs
-        self.server_pubkey = server_pubkey
         self.emergency_pubkeys = emergency_pubkeys
         # Ok, shitload of indexes. The current one is the lower bound of the
         # range we will import to bitcoind as watchonly. The max one is the
@@ -78,10 +77,19 @@ class Vault:
         self.emergency_address = str(CBitcoinAddress
                                      .from_scriptPubKey(txo.scriptPubKey))
 
+        # The cosigning server
+        if cosigning_url.endswith('/'):
+            self.cosigner = CosigningApi(cosigning_url[:-1])
+        else:
+            self.cosigner = CosigningApi(cosigning_url)
+        self.server_pubkey = self.cosigner.get_pubkey()
+
+        # The everything-server, allowing us to stay in sync
         if sigserver_url.endswith('/'):
             self.sigserver = ServerApi(sigserver_url[:-1])
         else:
             self.sigserver = ServerApi(sigserver_url)
+
         self.watched_addresses = []
         self.update_watched_addresses()
 
