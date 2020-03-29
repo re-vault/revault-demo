@@ -123,13 +123,16 @@ class BitcoindApi:
         self.bitcoind.importaddress(address, label, rescan)
         self.bitcoind_lock.release()
 
+    def mine(self, txid):
+        while txid not in self.bitcoind.getrawmempool():
+            time.sleep(0.5)
+        self.bitcoind.generatetoaddress(1, self.bitcoind.getnewaddress())
+
     def broadcast_and_mine(self, tx):
         """A routine used in the tests"""
         self.bitcoind_lock.acquire()
         txid = self.bitcoind.sendrawtransaction(tx)
-        while txid not in self.bitcoind.getrawmempool():
-            time.sleep(0.1)
-        self.bitcoind.generatetoaddress(1, self.bitcoind.getnewaddress())
+        self.mine(txid)
         self.bitcoind_lock.release()
         return txid
 
@@ -137,8 +140,13 @@ class BitcoindApi:
         """A helper for the functional tests.."""
         self.bitcoind_lock.acquire()
         txid = self.bitcoind.sendtoaddress(address, amount)
-        while txid not in self.bitcoind.getrawmempool():
-            time.sleep(0.1)
-        self.bitcoind.generatetoaddress(1, self.bitcoind.getnewaddress())
+        self.mine(txid)
         self.bitcoind_lock.release()
         return txid
+
+    def assertmempoolaccept(self, txs):
+        """Helper for sanity checks."""
+        self.bitcoind_lock.acquire()
+        res = self.bitcoind.testmempoolaccept(txs)
+        self.bitcoind_lock.release()
+        assert all(tx["allowed"] for tx in res)

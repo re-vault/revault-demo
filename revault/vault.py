@@ -428,9 +428,11 @@ class Vault:
                 form_emergency_vault_tx(vault["emergency_tx"],
                                         vault["pubkeys"],
                                         vault["emergency_sigs"])
-            # FIXME: use testmempoolaccept here
             vault["emergency_signed"] = True
             self.vaults_lock.release()
+            self.bitcoind.assertmempoolaccept([
+                b2x(vault["emergency_tx"].serialize())
+            ])
 
     def update_unvault_emergency(self, vault):
         """Poll the signature server for the unvault_emergency tx signature"""
@@ -452,7 +454,6 @@ class Vault:
                                      vault["unvault_emer_sigs"],
                                      vault["pubkeys"],
                                      self.server_pubkey)
-            # FIXME: use testmempoolaccept here
             self.vaults_lock.release()
 
     def update_cancel_unvault(self, vault):
@@ -474,7 +475,6 @@ class Vault:
                                                 vault["cancel_sigs"],
                                                 vault["pubkeys"],
                                                 self.server_pubkey)
-            # FIXME: use testmempoolaccept here
             self.vaults_lock.release()
 
     def update_unvault_transaction(self, vault):
@@ -495,9 +495,12 @@ class Vault:
             vault["unvault_tx"] = form_unvault_tx(vault["unvault_tx"],
                                                   vault["pubkeys"],
                                                   vault["unvault_sigs"])
-            # FIXME: use testmempoolaccept here
             vault["unvault_signed"] = True
             self.vaults_lock.release()
+            self.bitcoind.assertmempoolaccept([
+                # We can't test the cancel and the emer_unvault..
+                b2x(vault["unvault_tx"].serialize()),
+            ])
 
     def update_unvault_revocations(self, vault):
         """Don't stop polling the sig server until we have all the revocation

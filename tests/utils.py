@@ -20,6 +20,7 @@ BITCOIND_CONFIG = {
     "regtest": 1,
     "rpcuser": "rpcuser",
     "rpcpassword": "rpcpass",
+    "rpcthreads": 16,
     "addresstype": "bech32",
 }
 
