@@ -17,9 +17,9 @@ class CosigningApi:
 
         :return: The signature as bytes.
         """
-        r = requests.get("{}/sign/{}/{}/{}/{}/{}"
-                         .format(self.url, txid, *pubkeys, address, value,
-                                 prev_value))
+        r = requests.get("{}/sign/{}/{}/{}/{}/{}/{}/{}/{}"
+                         .format(self.url, txid, *pubkeys, address, int(value),
+                                 int(prev_value)))
         if r.status_code == 200:
             return bytes.fromhex(r.json()["sig"])
         else:

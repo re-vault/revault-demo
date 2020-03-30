@@ -1,7 +1,8 @@
+import bitcoin
 import os
 
+from bitcoin.core import lx
 from bitcoin.wallet import CKey
-from bitcoin.core import b2x
 from flask import Flask, jsonify
 
 from .transactions import create_spend_tx, sign_spend_tx
@@ -20,13 +21,14 @@ class CosigningServer:
         self.pubkey = CKey(self.privkey).pub
         # List of txids we already signed
         self.already_signed = []
+        bitcoin.SelectParams("regtest")
         self.setup_routes()
 
     def setup_routes(self):
         @self.server.route("/sign/<string:txid>/<string:pub1>/<string:pub2>/"
                            "<string:pub3>/<string:pub4>/<string:address>"
                            "/<int:value>/<int:prev_value>", methods=["GET"])
-        def get_signature(pub1, txid, pub2, pub3, pub4,
+        def get_signature(txid, pub1, pub2, pub3, pub4,
                           address, value, prev_value):
             """Sign a spend transaction.
 
@@ -42,16 +44,16 @@ class CosigningServer:
             if txid in self.already_signed:
                 return jsonify({"sig": None}), 403
 
-            spend_tx = create_spend_tx(txid, 0, value, address)
-            sigs = sign_spend_tx(spend_tx, [self.privkey],
-                                 [pub1, pub2, pub3, pub4], self.pubkey,
-                                 prev_value)
-            return jsonify({"sig": sigs[0]}), 200
+            spend_tx = create_spend_tx(lx(txid), 0, value, address)
+            pubkeys = [bytes.fromhex(pub) for pub in [pub1, pub2, pub3, pub4]]
+            sigs = sign_spend_tx(spend_tx, [self.privkey], pubkeys,
+                                 self.pubkey, prev_value)
+            return jsonify({"sig": sigs[0].hex()}), 200
 
         @self.server.route("/getpubkey", methods=["GET"])
         def get_pubkey():
             """Get our pubkey for the vault wallets to form the scripts."""
-            return jsonify({"pubkey": CKey(self.pubkey).pub.hex()})
+            return jsonify({"pubkey": self.pubkey.hex()}), 200
 
     def run(self, host, port, debug):
         self.server.run(host, port, debug)

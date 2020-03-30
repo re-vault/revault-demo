@@ -369,6 +369,7 @@ def create_spend_tx(unvault_txid, unvault_vout, value, address):
 
     :return: The unsigned transaction, a CMutableTransaction.
     """
+    # FIXME: handle the change !
     txout = CTxOut(value, CBitcoinAddress(address).to_scriptPubKey())
     txin = CTxIn(COutPoint(unvault_txid, unvault_vout), nSequence=6)
     return CMutableTransaction([txin], [txout], nVersion=2)

@@ -1,9 +1,11 @@
 import bitcoin
+import pytest
 import random
 import unittest
 
 from bip32 import BIP32
-from bitcoin.core import b2x
+from bitcoin.core import b2x, COIN
+from bitcoin.wallet import CKey
 from fixtures import *  # noqa: F401,F403
 from utils import SIGSERV_URL, COSIGNER_URL, wait_for
 
@@ -225,3 +227,32 @@ def test_cancel_unvault(vault_factory):
         bitcoind.broadcast_and_mine(b2x(vault.vaults[i]["unvault_emer_tx"]
                                         .serialize()))
     wait_for(lambda: all(len(v.vaults) == 4 for v in vaults))
+
+
+@unittest.skipIf("" in [SIGSERV_URL, COSIGNER_URL],
+                 "We need the servers for the vaults to operate")
+def test_spend_creation(vault_factory):
+    """Test that the signature exchange between the traders and cosigner leads
+    to a well-formed spend_tx."""
+    vaults = vault_factory.get_vaults()
+    vaultA, vaultB = vaults[0], vaults[1]
+    # FIXME: separate the Bitcoin backends !!
+    bitcoind = vaultA.bitcoind
+    bitcoind.pay_to(vaultA.getnewaddress(), 10)
+    wait_for(lambda: all(len(v.vaults) == 1 for v in vaults))
+    wait_for(lambda: all(v["emergency_signed"] for v in vaultA.vaults))
+    wait_for(lambda: all(v["unvault_signed"] for v in vaultA.vaults))
+    # Try to spend from the newly created vault
+    v = vaultA.vaults[0]
+    # FIXME
+    spend_amount = 10 * COIN - 50000
+    address = bitcoind.getnewaddress()
+    vaultA.initiate_spend(v, spend_amount, address)
+    sigB = vaultB.accept_spend(v["txid"], spend_amount, address)
+    pubkeyB = CKey(vaultB.vaults[0]["privkey"]).pub
+    tx = vaultA.complete_spend(v, pubkeyB, sigB, spend_amount, address)
+    bitcoind.broadcast_and_mine(b2x(v["unvault_tx"].serialize()))
+    addr = bitcoind.getnewaddress()
+    # Timelock
+    bitcoind.generatetoaddress(5, addr)
+    bitcoind.broadcast_and_mine(b2x(tx.serialize()))

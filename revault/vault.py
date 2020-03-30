@@ -4,7 +4,7 @@ import time
 
 from bip32 import BIP32
 from bitcoin.core import b2x, lx, COIN
-from bitcoin.wallet import CBitcoinAddress
+from bitcoin.wallet import CBitcoinAddress, CKey
 from decimal import Decimal, getcontext
 from .bitcoindapi import BitcoindApi
 from .cosigningapi import CosigningApi
@@ -14,7 +14,8 @@ from .transactions import (
     sign_emergency_vault_tx, form_emergency_vault_tx, create_unvault_tx,
     sign_unvault_tx, form_unvault_tx, create_cancel_tx, sign_cancel_tx,
     form_cancel_tx, create_emer_unvault_tx, sign_emer_unvault_tx,
-    form_emer_unvault_tx, get_transaction_size,
+    form_emer_unvault_tx, create_spend_tx, sign_spend_tx, form_spend_tx,
+    get_transaction_size,
 )
 
 
@@ -80,7 +81,7 @@ class Vault:
 
         # The cosigning server, asked for its signature for the spend_tx
         self.cosigner = CosigningApi(cosigning_url)
-        self.server_pubkey = self.cosigner.get_pubkey()
+        self.cosigner_pubkey = self.cosigner.get_pubkey()
 
         # The "sig" server, used to store and exchange signatures between
         # vaults and which provides us a feerate.
@@ -215,7 +216,7 @@ class Vault:
         """Create and return our signature for the unvault tx."""
         dummy_amount = bitcoin.core.COIN
         dummy_tx = create_unvault_tx(lx(vault["txid"]), vault["vout"],
-                                     vault["pubkeys"], self.server_pubkey,
+                                     vault["pubkeys"], self.cosigner_pubkey,
                                      dummy_amount)
         tx_size = get_transaction_size(dummy_tx)
         feerate = self.sigserver.get_feerate("cancel", b2x(dummy_tx.GetTxid()))
@@ -223,7 +224,7 @@ class Vault:
         # We reuse the vault pubkeys for the unvault script
         vault["unvault_tx"] = \
             create_unvault_tx(lx(vault["txid"]), vault["vout"],
-                              vault["pubkeys"], self.server_pubkey,
+                              vault["pubkeys"], self.cosigner_pubkey,
                               unvault_amount)
         return sign_unvault_tx(vault["unvault_tx"], vault["pubkeys"],
                                vault["amount"], [vault["privkey"]])[0]
@@ -244,7 +245,7 @@ class Vault:
                                               vault["pubkeys"], cancel_amount)
         # It wants the pubkeys for the prevout script, but they are the same!
         return sign_cancel_tx(vault["cancel_tx"], [vault["privkey"]],
-                              vault["pubkeys"], self.server_pubkey,
+                              vault["pubkeys"], self.cosigner_pubkey,
                               unvault_amount)[0]
 
     def create_sign_unvault_emer(self, vault):
@@ -264,7 +265,7 @@ class Vault:
                                    emer_amount)
         return sign_emer_unvault_tx(vault["unvault_emer_tx"],
                                     [vault["privkey"]], vault["pubkeys"],
-                                    self.server_pubkey, unvault_amount)[0]
+                                    self.cosigner_pubkey, unvault_amount)[0]
 
     def add_new_vault(self, output):
         """Add a new vault output to our list.
@@ -404,6 +405,89 @@ class Vault:
                     threading.Thread(target=self.update_all_signatures)
                 self.update_sigs_thread.start()
 
+    def wait_for_unvault_tx(self, vault):
+        """Wait until the unvault transaction is signed by everyone."""
+        while True:
+            self.vaults_lock.acquire()
+            signed = vault["unvault_signed"]
+            self.vaults_lock.release()
+            if signed:
+                break
+            time.sleep(0.5)
+
+    def create_sign_spend_tx(self, vault, value, address):
+        """Create and sign a spend tx which sends {value} sats to {address}.
+
+        :return: Our signature for this transaction.
+        """
+        # FIXME: the change !!
+        self.wait_for_unvault_tx(vault)
+        unvault_txid = vault["unvault_tx"].GetTxid()
+        unvault_value = vault["unvault_tx"].vout[0].nValue
+        assert len(vault["unvault_tx"].vout) == 1
+        spend_tx = create_spend_tx(unvault_txid, 0, value, address)
+        # We use the same pubkeys for the unvault and for the vault
+        sigs = sign_spend_tx(spend_tx, [vault["privkey"]], vault["pubkeys"],
+                             self.cosigner_pubkey, unvault_value)
+        return sigs[0]
+
+    def initiate_spend(self, vault, value, address):
+        """First step to spend, we sign it before handing it to our peer.
+
+        :param vault: The vault to spend, an entry of self.vaults[]
+        :param value: How many sats to spend.
+        :param address: Where to send those sats.
+
+        :return: Our signature for this spend transaction.
+        """
+        return self.create_sign_spend_tx(vault, value, address)
+
+    def accept_spend(self, vault_txid, value, address):
+        """We were handed a signature for a spend tx.
+        Recreate it, sign it and give our signature to our peer.
+
+        :param vault_txid: The txid of the vault to spend from.
+        :param value: How many sats to spend.
+        :param address: Where to send those sats.
+
+        :return: Our signature for this spend transaction, or None if we don't
+                 know about this vault.
+        """
+        for vault in self.vaults:
+            if vault["txid"] == vault_txid:
+                return self.create_sign_spend_tx(vault, value, address)
+        return None
+
+    def complete_spend(self, vault, peer_pubkey, peer_sig, value, address):
+        """Our fellow trader also signed the spend, now ask the cosigner and
+        notify other stakeholders we are about to spend a vault.
+
+        :param vault: The vault to spend, an entry of self.vaults[]
+        :param peer_pubkey: The other peer's pubkey.
+        :param peer_sig: A signature for this spend_tx with the above pubkey.
+        :param value: How many sats to spend.
+        :param address: Where to send those sats.
+
+        :return: The fully signed transaction.
+        """
+        our_sig = self.create_sign_spend_tx(vault, value, address)
+        unvault_txid = vault["unvault_tx"].GetTxid()
+        assert len(vault["unvault_tx"].vout) == 1
+        unvault_value = vault["unvault_tx"].vout[0].nValue
+        cosig = \
+            self.cosigner.get_signature(unvault_txid[::-1].hex(),
+                                        [p.hex() for p in vault["pubkeys"]],
+                                        address, value, unvault_value)
+        spend_tx = create_spend_tx(unvault_txid, 0, value, address)
+        # Now the fun part, correctly reconstruct the script
+        all_sigs = [bytes(0)] * 3 + [cosig]
+        our_pos = vault["pubkeys"].index(CKey(vault["privkey"]).pub)
+        peer_pos = vault["pubkeys"].index(peer_pubkey)
+        all_sigs[our_pos] = our_sig
+        all_sigs[peer_pos] = peer_sig
+        return form_spend_tx(spend_tx, vault["pubkeys"], self.cosigner_pubkey,
+                             all_sigs)
+
     def update_emergency_signatures(self, vault):
         """Don't stop polling the sig server until we have all the sigs.
 
@@ -453,7 +537,7 @@ class Vault:
                 form_emer_unvault_tx(vault["unvault_emer_tx"],
                                      vault["unvault_emer_sigs"],
                                      vault["pubkeys"],
-                                     self.server_pubkey)
+                                     self.cosigner_pubkey)
             self.vaults_lock.release()
 
     def update_cancel_unvault(self, vault):
@@ -474,7 +558,7 @@ class Vault:
             vault["cancel_tx"] = form_cancel_tx(vault["cancel_tx"],
                                                 vault["cancel_sigs"],
                                                 vault["pubkeys"],
-                                                self.server_pubkey)
+                                                self.cosigner_pubkey)
             self.vaults_lock.release()
 
     def update_unvault_transaction(self, vault):
