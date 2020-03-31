@@ -7,10 +7,11 @@ from bip32 import BIP32
 from bitcoin.rpc import RawProxy as BitcoinProxy
 from bitcoin.wallet import CKey
 from ephemeral_port_reserve import reserve
-from revault import Vault
+from revault import Vault, SigServer, CosigningServer
 
 import logging
 import os
+import random
 import re
 import subprocess
 import threading
@@ -20,7 +21,6 @@ BITCOIND_CONFIG = {
     "regtest": 1,
     "rpcuser": "rpcuser",
     "rpcpassword": "rpcpass",
-    "rpcthreads": 16,
     "addresstype": "bech32",
 }
 
@@ -250,7 +250,8 @@ class BitcoinD(TailableProc):
             '-logtimestamps',
             '-nolisten',
             '-txindex',
-            '-addresstype=bech32'
+            '-addresstype=bech32',
+            '-rpcthreads=8',
         ]
         # For up to and including 0.16.1, this needs to be in main section.
         BITCOIND_CONFIG['rpcport'] = rpcport
@@ -412,20 +413,54 @@ class VaultFactory:
         """Spin up some already connected vaults."""
         # FIXME: use a bitcoind for each !!
         self.bitcoind = bitcoind
+        self.bitcoind_fake_tx_load()
         self.vaults = []
+        self.server_threads = []
+        self.sigserver_port = 5000
+        self.cosigning_port = 5001
+
+    def bitcoind_fake_tx_load(self):
+        """Simulate a fake load of transactions to fill fee estimation
+        buckets."""
+        while "feerate" not in self.bitcoind.rpc.estimatesmartfee(10):
+            addr = self.bitcoind.rpc.getnewaddress()
+            for _ in range(10):
+                self.bitcoind.rpc.sendtoaddress(addr, 1)
+            self.bitcoind.rpc.generatetoaddress(1, addr)
+
+    def start_servers(self):
+        """Starts the sig and cosigning servers."""
+        sigserv = SigServer(bitcoind_conf_path=self.bitcoind.
+                            rpc.__btc_conf_file__)
+        threading.Thread(target=sigserv.run, daemon=True, kwargs={
+            "host": "localhost",
+            "port": self.sigserver_port,
+            "debug": False,
+        }).start()
+        cosigner = CosigningServer()
+        threading.Thread(target=cosigner.run, daemon=True, kwargs={
+            "host": "localhost",
+            "port": self.cosigning_port,
+            "debug": False,
+        }).start()
 
     def get_vaults(self, emergency_privkeys=None):
-        """Get 4 vaults, one for each stakeholder."""
+        """Get 4 vaults, one for each stakeholder. Spin up the servers."""
+        self.start_servers()
         bip32s = [BIP32.from_seed(os.urandom(32), "test") for _ in range(4)]
         xpubs = [bip32.get_master_xpub() for bip32 in bip32s]
         if emergency_privkeys is None:
             emergency_privkeys = [CKey(os.urandom(32)) for _ in range(4)]
         emergency_pubkeys = [k.pub for k in emergency_privkeys]
         self.vaults = []
+        # Generate some random 'OK' addresses
+        acked_addresses = [self.bitcoind.getnewaddress() for _ in range(5)]
         for bip32 in bip32s:
             xpriv = bip32.get_master_xpriv()
             conf = self.bitcoind.rpc.__btc_conf_file__
-            # FIXME: No we cant test without servers anymore..
+            cosigner_url = "http://localhost:{}".format(self.cosigning_port)
+            sigserv_url = "http://localhost:{}".format(self.sigserver_port)
             self.vaults.append(Vault(xpriv, xpubs, emergency_pubkeys, conf,
-                                     COSIGNER_URL, SIGSERV_URL))
+                                     cosigner_url, sigserv_url,
+                                     acked_addresses))
         return self.vaults

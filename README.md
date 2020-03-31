@@ -15,10 +15,6 @@ pip install -r requirements.txt
 python3 setup.py install
 # Install the tests dependencies
 pip install -r tests/requirements.txt
-# Start regtest, the signature server provides the feerate and needs a bitcoind
-start_regtest
-# Start the servers (the signature one and cosigning one)
-. tests/start_sigserver $PWD/regtest/bcdir1/bitcoin.conf
 # Run the test suite
 pytest -vvv tests/ -n4
 ```
