@@ -3,7 +3,7 @@ import threading
 import time
 
 from bip32 import BIP32
-from bitcoin.core import b2x, lx, COIN
+from bitcoin.core import lx, COIN
 from bitcoin.wallet import CBitcoinAddress, CKey
 from decimal import Decimal, getcontext
 from .bitcoindapi import BitcoindApi
@@ -66,8 +66,6 @@ class Vault:
         self.current_gen_index = self.current_index
         self.max_index = current_index + 500
         self.index_treshold = self.max_index
-        # Needs to be acquired to access any of the above
-        self.keys_lock = threading.Lock()
 
         self.birthdate = int(time.time()) if birthdate is None else birthdate
 
@@ -101,9 +99,9 @@ class Vault:
         getcontext().prec = 8
 
         # Poll for funds until we die
-        self.poller_stop = threading.Event()  # FIXME varname
-        self.poller = threading.Thread(target=self.poll_for_funds)
-        self.poller.start()
+        self.funds_poller_stop = threading.Event()
+        self.funds_poller = threading.Thread(target=self.poll_for_funds)
+        self.funds_poller.start()
 
         # Poll for spends until we die
         self.acked_addresses = acked_addresses
@@ -125,8 +123,8 @@ class Vault:
 
     def stop(self):
         # Stop the thread polling bitcoind
-        self.poller_stop.set()
-        self.poller.join()
+        self.funds_poller_stop.set()
+        self.funds_poller.join()
         self.bitcoind.close()
 
         # Stop the thread updating emergency transactions
@@ -150,19 +148,16 @@ class Vault:
         :return: A list of the four pubkeys for this bip32 derivation index.
         """
         pubkeys = []
-        self.keys_lock.acquire()
         for keychain in self.keychains:
             if keychain:
                 pubkeys.append(keychain.get_pubkey_from_path([index]))
             else:
                 pubkeys.append(self.our_bip32.get_pubkey_from_path([index]))
-        self.keys_lock.release()
         return pubkeys
 
     def watch_emergency_vault(self):
         """There is only one emergency script"""
-        # FIXME b2x
-        pubkeys = [b2x(pub) for pub in self.emergency_pubkeys]
+        pubkeys = [pub.hex() for pub in self.emergency_pubkeys]
         self.bitcoind.importmulti(pubkeys, self.birthdate)
 
     def update_watched_addresses(self):
@@ -217,7 +212,7 @@ class Vault:
                                              amount, self.emergency_pubkeys)
         tx_size = get_transaction_size(dummy_tx)
         feerate = self.sigserver.get_feerate("emergency",
-                                             b2x(dummy_tx.GetTxid()))
+                                             dummy_tx.GetTxid().hex())
         fees = feerate * tx_size
         amount = vault["amount"] - fees
         vault["emergency_tx"] = \
@@ -233,7 +228,8 @@ class Vault:
                                      vault["pubkeys"], self.cosigner_pubkey,
                                      dummy_amount)
         tx_size = get_transaction_size(dummy_tx)
-        feerate = self.sigserver.get_feerate("cancel", b2x(dummy_tx.GetTxid()))
+        feerate = self.sigserver.get_feerate("cancel",
+                                             dummy_tx.GetTxid().hex())
         unvault_amount = vault["amount"] - feerate * tx_size
         # We reuse the vault pubkeys for the unvault script
         vault["unvault_tx"] = \
@@ -253,7 +249,8 @@ class Vault:
         dummy_tx = create_cancel_tx(unvault_txid, 0, vault["pubkeys"],
                                     dummy_amount)
         tx_size = get_transaction_size(dummy_tx)
-        feerate = self.sigserver.get_feerate("cancel", b2x(dummy_tx.GetTxid()))
+        feerate = self.sigserver.get_feerate("cancel",
+                                             dummy_tx.GetTxid().hex())
         cancel_amount = unvault_amount - feerate * tx_size
         vault["cancel_tx"] = create_cancel_tx(unvault_txid, 0,
                                               vault["pubkeys"], cancel_amount)
@@ -272,7 +269,7 @@ class Vault:
                                           self.emergency_pubkeys, dummy_amount)
         tx_size = get_transaction_size(dummy_tx)
         feerate = self.sigserver.get_feerate("emergency",
-                                             b2x(dummy_tx.GetTxid()))
+                                             dummy_tx.GetTxid().hex())
         emer_amount = unvault_amount - feerate * tx_size
         vault["unvault_emer_tx"] = \
             create_emer_unvault_tx(unvault_txid, 0, self.emergency_pubkeys,
@@ -331,11 +328,11 @@ class Vault:
         # Who am I ?
         stk_id = self.keychains.index(None) + 1
         # Send all our sigs but the unvault one, until we are secured
-        self.sigserver.send_signature(b2x(vault["emergency_tx"].GetTxid()),
+        self.sigserver.send_signature(vault["emergency_tx"].GetTxid().hex(),
                                       emer_sig, stk_id)
-        self.sigserver.send_signature(b2x(vault["cancel_tx"].GetTxid()),
+        self.sigserver.send_signature(vault["cancel_tx"].GetTxid().hex(),
                                       cancel_sig, stk_id)
-        self.sigserver.send_signature(b2x(vault["unvault_emer_tx"].GetTxid()),
+        self.sigserver.send_signature(vault["unvault_emer_tx"].GetTxid().hex(),
                                       unvault_emer_sig, stk_id)
         self.vaults.append(vault)
 
@@ -356,7 +353,7 @@ class Vault:
         construct the corresponding emergency transaction and spawn a thread
         to fetch emergency transactions signatures.
         """
-        while not self.poller_stop.wait(5.0):
+        while not self.funds_poller_stop.wait(5.0):
             # FIXME: why cannot it be initialized like ([], ) * 4 ?
             known_outputs = []
             unvault_addresses = []
@@ -540,7 +537,7 @@ class Vault:
         :vault: The dictionary representing the vault we are fetching the
                 emergency signatures for.
         """
-        txid = b2x(vault["emergency_tx"].GetTxid())
+        txid = vault["emergency_tx"].GetTxid().hex()
         # Poll until finished, or master tells us to stop
         while None in vault["emergency_sigs"] \
                 and not self.update_sigs_stop.wait(2.0):
@@ -561,12 +558,12 @@ class Vault:
             vault["emergency_signed"] = True
             self.vaults_lock.release()
             self.bitcoind.assertmempoolaccept([
-                b2x(vault["emergency_tx"].serialize())
+                vault["emergency_tx"].serialize().hex()
             ])
 
     def update_unvault_emergency(self, vault):
         """Poll the signature server for the unvault_emergency tx signature"""
-        txid = b2x(vault["unvault_emer_tx"].GetTxid())
+        txid = vault["unvault_emer_tx"].GetTxid().hex()
         # Poll until finished, or master tells us to stop
         while None in vault["unvault_emer_sigs"] and \
                 not self.update_sigs_stop.wait(2.0):
@@ -588,7 +585,7 @@ class Vault:
 
     def update_cancel_unvault(self, vault):
         """Poll the signature server for the cancel_unvault tx signature"""
-        txid = b2x(vault["cancel_tx"].GetTxid())
+        txid = vault["cancel_tx"].GetTxid().hex()
         # Poll until finished, or master tells us to stop
         while None in vault["cancel_sigs"] and \
                 not self.update_sigs_stop.wait(2.0):
@@ -609,7 +606,7 @@ class Vault:
 
     def update_unvault_transaction(self, vault):
         """Get others' sig for the unvault transaction"""
-        txid = b2x(vault["unvault_tx"].GetTxid())
+        txid = vault["unvault_tx"].GetTxid().hex()
         # Poll until finished, or master tells us to stop
         while None in vault["unvault_sigs"] and \
                 not self.update_sigs_stop.wait(2.0):
@@ -629,7 +626,7 @@ class Vault:
             self.vaults_lock.release()
             self.bitcoind.assertmempoolaccept([
                 # We can't test the cancel and the emer_unvault..
-                b2x(vault["unvault_tx"].serialize()),
+                vault["unvault_tx"].serialize().hex(),
             ])
 
     def update_unvault_revocations(self, vault):
@@ -651,7 +648,7 @@ class Vault:
             self.bitcoind.importaddress(unvault_addr, "unvault", False)
             # Who am I ?
             stk_id = self.keychains.index(None) + 1
-            self.sigserver.send_signature(b2x(vault["unvault_tx"].GetTxid()),
+            self.sigserver.send_signature(vault["unvault_tx"].GetTxid().hex(),
                                           vault["unvault_sigs"][stk_id - 1],
                                           stk_id)
             self.update_unvault_transaction(vault)
