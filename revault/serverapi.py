@@ -13,6 +13,7 @@ class ServerApi:
         """
         :param url: The url of the sigserver.
         """
+        # FIXME stk_id
         self.url = url
 
     def send_signature(self, txid, sig, stk_id):
@@ -22,6 +23,7 @@ class ServerApi:
         :param txid: The id of the transaction this transaction is for
         :param stk_id: The id of the stakeholder this transaction is from
         """
+        # FIXME txid
         if isinstance(sig, bytes):
             sig = sig.hex()
         elif not isinstance(sig, str):
@@ -65,3 +67,40 @@ class ServerApi:
         btc_perkvb = Decimal(r.json()["feerate"])
         # Explicit conversion to sat per virtual byte
         return int(btc_perkvb * Decimal(COIN) / Decimal(1000))
+
+    def request_spend(self, vault_txid, address):
+        r = requests.post("{}/requestspend/{}/{}".format(self.url, vault_txid,
+                                                         address))
+        if not r.status_code == 201 or not r.json()["success"]:
+            raise Exception("The sigserver returned with '{}', saying '{}'"
+                            .format(r.status_code, r.text))
+
+    def accept_spend(self, vault_txid, address, stk_id):
+        r = requests.post("{}/acceptspend/{}/{}/{}"
+                          .format(self.url, vault_txid, address, stk_id))
+        if not r.status_code == 201 or not r.json()["success"]:
+            raise Exception("The sigserver returned with '{}', saying '{}'"
+                            .format(r.status_code, r.text))
+
+    def refuse_spend(self, vault_txid, address, stk_id):
+        r = requests.post("{}/refusespend/{}/{}/{}"
+                          .format(self.url, vault_txid, address, stk_id))
+        if not r.status_code == 201 or not r.json()["success"]:
+            raise Exception("The sigserver returned with '{}', saying '{}'"
+                            .format(r.status_code, r.text))
+
+    def spend_accepted(self, vault_txid):
+        r = requests.get("{}/spendaccepted/{}".format(self.url, vault_txid))
+        if not r.status_code == 200:
+            raise Exception("The sigserver returned with '{}', saying '{}'"
+                            .format(r.status_code, r.text))
+
+        return r.json()["accepted"]
+
+    def get_spends(self):
+        r = requests.get("{}/spendrequests".format(self.url))
+        if not r.status_code == 200:
+            raise Exception("The sigserver returned with '{}', saying '{}'"
+                            .format(r.status_code, r.text))
+
+        return r.json()

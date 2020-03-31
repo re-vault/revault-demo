@@ -9,7 +9,7 @@ class SigServer:
     """
     A wrapper around a dead simple server storing signatures and providing
     feerates, note that it intentionally doesn't do any checks or
-    authentication.
+    authentication. Poor API, don't mind that.
     """
     def __init__(self, bitcoind_conf_path):
         """Uncommon pattern, but a handy one. We setup everything when the
@@ -27,6 +27,8 @@ class SigServer:
         self.feerates = {}
         # A dictionary to store each stakeholder acceptance to a spend,
         # represented as a list of four booleans.
+        self.spend_acceptance = {}
+        # A dictionary to store each spend destination by txid.
         self.spend_requests = {}
         self.setup_routes()
 
@@ -92,7 +94,8 @@ class SigServer:
 
             This is called by the spend initiator to advertise its willing.
             """
-            self.spend_requests[vault_txid] = [False, False, False, False]
+            self.spend_requests[vault_txid] = address
+            self.spend_acceptance[vault_txid] = [None, None, None, None]
 
             return jsonify({"success": True}), 201
 
@@ -100,7 +103,15 @@ class SigServer:
                            "/<int:stk_id>", methods=["POST"])
         def accept_spend(vault_txid, address, stk_id):
             """Make stakeholder n°{stk_id} accept this spend."""
-            self.spend_requests[vault_txid][stk_id - 1] = True
+            self.spend_acceptance[vault_txid][stk_id - 1] = True
+
+            return jsonify({"success": True}), 201
+
+        @self.server.route("/refusespend/<string:vault_txid>/<string:address>"
+                           "/<int:stk_id>", methods=["POST"])
+        def refuse_spend(vault_txid, address, stk_id):
+            """Make stakeholder n°{stk_id} accept this spend."""
+            self.spend_acceptance[vault_txid][stk_id - 1] = False
 
             return jsonify({"success": True}), 201
 
@@ -112,9 +123,15 @@ class SigServer:
             We use null for not completed, True for accepted, False for
             rejected.
             """
-            if None in self.spend_requests[vault_txid]:
+            if None in self.spend_acceptance[vault_txid]:
                 return jsonify({"accepted": None})
-            return jsonify({"accepted": all(self.spend_requests[vault_txid])})
+            return jsonify({
+                "accepted": all(self.spend_acceptance[vault_txid])
+            })
+
+        @self.server.route("/spendrequests", methods=["GET"])
+        def spendrequests():
+            return jsonify(self.spend_requests)
 
     def test_client(self):
         return self.server.test_client()

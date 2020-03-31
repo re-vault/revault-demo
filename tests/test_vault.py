@@ -1,5 +1,4 @@
 import bitcoin
-import pytest
 import random
 import unittest
 
@@ -246,7 +245,8 @@ def test_spend_creation(vault_factory):
     v = vaultA.vaults[0]
     # FIXME
     spend_amount = 10 * COIN - 50000
-    address = bitcoind.getnewaddress()
+    # Choose a valid address
+    address = random.choice(vaultA.acked_addresses)
     vaultA.initiate_spend(v, spend_amount, address)
     sigB = vaultB.accept_spend(v["txid"], spend_amount, address)
     pubkeyB = CKey(vaultB.vaults[0]["privkey"]).pub

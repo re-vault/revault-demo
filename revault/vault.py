@@ -28,8 +28,8 @@ class Vault:
     vault.
     """
     def __init__(self, xpriv, xpubs, emergency_pubkeys, bitcoin_conf_path,
-                 cosigning_url, sigserver_url, current_index=0,
-                 birthdate=None):
+                 cosigning_url, sigserver_url, acked_addresses,
+                 current_index=0, birthdate=None):
         """
         We need the xpub of all the other stakeholders to derive their pubkeys.
 
@@ -45,6 +45,7 @@ class Vault:
         :param cosigning_url: The url of the cosigning server.
         :param sigserver_url: The url of the server to post / get the sigs from
                               other stakeholders.
+        :param acked_addresses: Addresses to which we accept to spend.
         :param birthdate: The timestamp at which this wallet has been created.
                           If not passed, will assume newly-created wallet.
         """
@@ -100,9 +101,16 @@ class Vault:
         getcontext().prec = 8
 
         # Poll for funds until we die
-        self.poller_stop = threading.Event()
+        self.poller_stop = threading.Event()  # FIXME varname
         self.poller = threading.Thread(target=self.poll_for_funds)
         self.poller.start()
+
+        # Poll for spends until we die
+        self.acked_addresses = acked_addresses
+        self.known_spends = []
+        self.spends_poller_stop = threading.Event()
+        self.spends_poller = threading.Thread(target=self.poll_for_spends)
+        self.spends_poller.start()
 
         # Don't start polling for signatures just yet, we don't have any vault!
         self.update_sigs_stop = threading.Event()
@@ -129,6 +137,11 @@ class Vault:
             except RuntimeError:
                 # Already dead
                 pass
+
+        # Stop the thread checking spends
+        self.spends_poller_stop.set()
+        self.spends_poller.join()
+
         self.stopped = True
 
     def get_pubkeys(self, index):
@@ -148,6 +161,7 @@ class Vault:
 
     def watch_emergency_vault(self):
         """There is only one emergency script"""
+        # FIXME b2x
         pubkeys = [b2x(pub) for pub in self.emergency_pubkeys]
         self.bitcoind.importmulti(pubkeys, self.birthdate)
 
@@ -491,10 +505,10 @@ class Vault:
                                  self.cosigner_pubkey, all_sigs)
 
         # Notify others
-        self.sigserver.request_spend(vault["txid"][::-1].hex(), address)
+        self.sigserver.request_spend(vault["txid"], address)
         # Wait for their response, keep it simple..
         while True:
-            res = self.sigserver.spend_accepted(vault["txid"][::-1])
+            res = self.sigserver.spend_accepted(vault["txid"])
             if res:
                 break
             # May also be None !
@@ -503,6 +517,22 @@ class Vault:
             time.sleep(0.5)
 
         return spend_tx
+
+    def poll_for_spends(self):
+        """Poll the sigserver for spend requests.
+
+        Accept the spend if now the spend, refuse otherwise.
+        """
+        while not self.spends_poller_stop.wait(3.0):
+            spends = self.sigserver.get_spends()
+            for txid in [txid for txid, address in spends.items()
+                         if txid not in self.known_spends]:
+                stk_id = self.keychains.index(None) + 1
+                if spends[txid] not in self.acked_addresses:
+                    self.sigserver.refuse_spend(txid, spends[txid], stk_id)
+                else:
+                    self.sigserver.accept_spend(txid, spends[txid], stk_id)
+                self.known_spends.append(txid)
 
     def update_emergency_signatures(self, vault):
         """Don't stop polling the sig server until we have all the sigs.
