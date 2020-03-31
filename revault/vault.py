@@ -460,7 +460,9 @@ class Vault:
 
     def complete_spend(self, vault, peer_pubkey, peer_sig, value, address):
         """Our fellow trader also signed the spend, now ask the cosigner and
-        notify other stakeholders we are about to spend a vault.
+        notify other stakeholders we are about to spend a vault. We wait
+        synchronously for their response, once again an assumption that's
+        a demo!
 
         :param vault: The vault to spend, an entry of self.vaults[]
         :param peer_pubkey: The other peer's pubkey.
@@ -485,8 +487,22 @@ class Vault:
         peer_pos = vault["pubkeys"].index(peer_pubkey)
         all_sigs[our_pos] = our_sig
         all_sigs[peer_pos] = peer_sig
-        return form_spend_tx(spend_tx, vault["pubkeys"], self.cosigner_pubkey,
-                             all_sigs)
+        spend_tx = form_spend_tx(spend_tx, vault["pubkeys"],
+                                 self.cosigner_pubkey, all_sigs)
+
+        # Notify others
+        self.sigserver.request_spend(vault["txid"][::-1].hex(), address)
+        # Wait for their response, keep it simple..
+        while True:
+            res = self.sigserver.spend_accepted(vault["txid"][::-1])
+            if res:
+                break
+            # May also be None !
+            elif res is False:
+                raise Exception("Spend rejected.")
+            time.sleep(0.5)
+
+        return spend_tx
 
     def update_emergency_signatures(self, vault):
         """Don't stop polling the sig server until we have all the sigs.
