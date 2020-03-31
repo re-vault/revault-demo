@@ -11,7 +11,6 @@ from revault import Vault, SigServer, CosigningServer
 
 import logging
 import os
-import random
 import re
 import subprocess
 import threading
@@ -26,8 +25,6 @@ BITCOIND_CONFIG = {
 
 
 TIMEOUT = int(os.getenv("TIMEOUT", 60))
-COSIGNER_URL = os.getenv("COSIGNER_URL", "")
-SIGSERV_URL = os.getenv("SIGSERV_URL", "")
 
 
 def wait_for(success, timeout=TIMEOUT):
@@ -416,8 +413,8 @@ class VaultFactory:
         self.bitcoind_fake_tx_load()
         self.vaults = []
         self.server_threads = []
-        self.sigserver_port = 5000
-        self.cosigning_port = 5001
+        self.sigserver_port = reserve()
+        self.cosigning_port = reserve()
 
     def bitcoind_fake_tx_load(self):
         """Simulate a fake load of transactions to fill fee estimation
