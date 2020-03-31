@@ -102,20 +102,22 @@ class Vault:
 
         # Poll for funds until we die
         self.funds_poller_stop = threading.Event()
-        self.funds_poller = threading.Thread(target=self.poll_for_funds)
+        self.funds_poller = threading.Thread(target=self.poll_for_funds,
+                                             daemon=True)
         self.funds_poller.start()
 
         # Poll for spends until we die
         self.acked_addresses = acked_addresses
         self.known_spends = []
         self.spends_poller_stop = threading.Event()
-        self.spends_poller = threading.Thread(target=self.poll_for_spends)
+        self.spends_poller = threading.Thread(target=self.poll_for_spends,
+                                              daemon=True)
         self.spends_poller.start()
 
         # Don't start polling for signatures just yet, we don't have any vault!
         self.update_sigs_stop = threading.Event()
         self.update_sigs_thread =\
-            threading.Thread(target=self.update_all_signatures)
+            threading.Thread(target=self.update_all_signatures, daemon=True)
 
         self.stopped = False
 
@@ -129,18 +131,7 @@ class Vault:
         self.funds_poller.join()
         self.bitcoind.close()
 
-        # Stop the thread updating emergency transactions
-        self.update_sigs_stop.set()
-        if self.update_sigs_thread is not None:
-            try:
-                self.update_sigs_thread.join()
-            except RuntimeError:
-                # Already dead
-                pass
-
-        # Stop the thread checking spends
-        self.spends_poller_stop.set()
-        self.spends_poller.join()
+        # The two threads polling the server will stop by themselves
 
         self.stopped = True
 
@@ -413,7 +404,8 @@ class Vault:
                 self.update_sigs_stop.clear()
                 del self.update_sigs_thread
                 self.update_sigs_thread = \
-                    threading.Thread(target=self.update_all_signatures)
+                    threading.Thread(target=self.update_all_signatures,
+                                     daemon=True)
                 self.update_sigs_thread.start()
 
     def wait_for_unvault_tx(self, vault):
@@ -525,6 +517,8 @@ class Vault:
             for txid in [txid for txid, address in spends.items()
                          if txid not in self.known_spends]:
                 if spends[txid] not in self.acked_addresses:
+                    raise Exception("{}, {}".format(spends[txid],
+                                                    self.acked_addresses))
                     self.sigserver.refuse_spend(txid, spends[txid])
                 else:
                     self.sigserver.accept_spend(txid, spends[txid])
@@ -538,8 +532,9 @@ class Vault:
         """
         txid = vault["emergency_tx"].GetTxid().hex()
         # Poll until finished, or master tells us to stop
-        while None in vault["emergency_sigs"] \
-                and not self.update_sigs_stop.wait(2.0):
+        while None in vault["emergency_sigs"]:
+            if self.update_sigs_stop.wait(2.0):
+                break
             for i in range(1, 5):
                 if vault["emergency_sigs"][i - 1] is None:
                     self.vaults_lock.acquire()
@@ -548,7 +543,7 @@ class Vault:
                     self.vaults_lock.release()
         # Only populate the sigs if we got them all, not if master told us to
         # stop.
-        if not self.update_sigs_stop.wait(0.0):
+        if None not in vault["emergency_sigs"]:
             self.vaults_lock.acquire()
             vault["emergency_tx"] = \
                 form_emergency_vault_tx(vault["emergency_tx"],
@@ -564,16 +559,18 @@ class Vault:
         """Poll the signature server for the unvault_emergency tx signature"""
         txid = vault["unvault_emer_tx"].GetTxid().hex()
         # Poll until finished, or master tells us to stop
-        while None in vault["unvault_emer_sigs"] and \
-                not self.update_sigs_stop.wait(2.0):
+        while None in vault["unvault_emer_sigs"]:
+            if self.update_sigs_stop.wait(2.0):
+                break
             for i in range(1, 5):
                 if vault["unvault_emer_sigs"][i - 1] is None:
                     self.vaults_lock.acquire()
                     vault["unvault_emer_sigs"][i - 1] = \
                         self.sigserver.get_signature(txid, i)
                     self.vaults_lock.release()
+
         # Only populate the sigs if we got them all, not if we were stopped.
-        if not self.update_sigs_stop.wait(0.0):
+        if None not in vault["unvault_emer_sigs"]:
             self.vaults_lock.acquire()
             vault["unvault_emer_tx"] = \
                 form_emer_unvault_tx(vault["unvault_emer_tx"],
@@ -586,16 +583,18 @@ class Vault:
         """Poll the signature server for the cancel_unvault tx signature"""
         txid = vault["cancel_tx"].GetTxid().hex()
         # Poll until finished, or master tells us to stop
-        while None in vault["cancel_sigs"] and \
-                not self.update_sigs_stop.wait(2.0):
+        while None in vault["cancel_sigs"]:
+            if self.update_sigs_stop.wait(2.0):
+                break
             for i in range(1, 5):
                 if vault["cancel_sigs"][i - 1] is None:
                     self.vaults_lock.acquire()
                     vault["cancel_sigs"][i - 1] = \
                         self.sigserver.get_signature(txid, i)
                     self.vaults_lock.release()
+
         # Only populate the sigs if we got them all, not if we were stopped.
-        if not self.update_sigs_stop.wait(0.0):
+        if None not in vault["cancel_sigs"]:
             self.vaults_lock.acquire()
             vault["cancel_tx"] = form_cancel_tx(vault["cancel_tx"],
                                                 vault["cancel_sigs"],
@@ -607,16 +606,18 @@ class Vault:
         """Get others' sig for the unvault transaction"""
         txid = vault["unvault_tx"].GetTxid().hex()
         # Poll until finished, or master tells us to stop
-        while None in vault["unvault_sigs"] and \
-                not self.update_sigs_stop.wait(2.0):
+        while None in vault["unvault_sigs"]:
+            if self.update_sigs_stop.wait(2.0):
+                break
             for i in range(1, 5):
                 if vault["unvault_sigs"][i - 1] is None:
                     self.vaults_lock.acquire()
                     vault["unvault_sigs"][i - 1] = \
                         self.sigserver.get_signature(txid, i)
                     self.vaults_lock.release()
+
         # Only populate the sigs if we got them all, not if we were stopped.
-        if not self.update_sigs_stop.wait(0.0):
+        if None not in vault["unvault_sigs"]:
             self.vaults_lock.acquire()
             vault["unvault_tx"] = form_unvault_tx(vault["unvault_tx"],
                                                   vault["pubkeys"],
@@ -645,7 +646,6 @@ class Vault:
                 vault["unvault_tx"].vout[0].scriptPubKey
             ))
             self.bitcoind.importaddress(unvault_addr, "unvault", False)
-            # Who am I ?
             self.sigserver.send_signature(vault["unvault_tx"].GetTxid().hex(),
                                           vault["unvault_sigs"][self.keychains
                                                                 .index(None)])
