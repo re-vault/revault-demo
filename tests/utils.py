@@ -4,7 +4,7 @@ Rusty Russell or Christian Decker who wrote most of this (I'd put some sats on
 cdecker), so credits to them ! (MIT licensed)
 """
 from bip32 import BIP32
-from bitcoin.rpc import RawProxy as BitcoinProxy
+from bitcoin.rpc import RawProxy as BitcoinProxy, JSONRPCError
 from bitcoin.wallet import CKey
 from ephemeral_port_reserve import reserve
 from revault import Vault, SigServer, CosigningServer
@@ -216,7 +216,15 @@ class SimpleBitcoinProxy:
         proxy = BitcoinProxy(btc_conf_file=self.__btc_conf_file__)
 
         def f(*args):
-            return proxy._call(name, *args)
+            try:
+                nonlocal proxy
+                res = proxy._call(name, *args)
+            except JSONRPCError:
+                del proxy
+                time.sleep(3)
+                proxy = BitcoinProxy(btc_conf_file=self.__btc_conf_file__)
+                res = proxy._call(name, *args)
+            return res
 
         # Make debuggers show <function bitcoin.rpc.name> rather than <function
         # bitcoin.rpc.<lambda>>
@@ -248,7 +256,7 @@ class BitcoinD(TailableProc):
             '-nolisten',
             '-txindex',
             '-addresstype=bech32',
-            '-rpcthreads=8',
+            '-rpcthreads=16',
         ]
         # For up to and including 0.16.1, this needs to be in main section.
         BITCOIND_CONFIG['rpcport'] = rpcport
