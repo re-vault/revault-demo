@@ -67,9 +67,7 @@ def test_sigserver_feerate(vault_factory):
 def test_signatures_posting(vault_factory):
     """Test that we can send signatures to the sig server."""
     vault = vault_factory.get_vaults()[0]
-    # Who am I ?
-    stk_id = vault.keychains.index(None) + 1
-    vault.sigserver.send_signature("00af", "aa56", stk_id)
+    vault.sigserver.send_signature("00af", "aa56")
 
 
 @unittest.skipIf("" in [SIGSERV_URL, COSIGNER_URL],

@@ -84,7 +84,9 @@ class Vault:
 
         # The "sig" server, used to store and exchange signatures between
         # vaults and which provides us a feerate.
-        self.sigserver = ServerApi(sigserver_url)
+        # Who am I ?
+        stk_id = self.keychains.index(None) + 1
+        self.sigserver = ServerApi(sigserver_url, stk_id)
 
         self.vault_addresses = []
         self.update_watched_addresses()
@@ -325,15 +327,13 @@ class Vault:
             self.create_sign_unvault(vault)
         cancel_sig = self.create_sign_cancel(vault)
         unvault_emer_sig = self.create_sign_unvault_emer(vault)
-        # Who am I ?
-        stk_id = self.keychains.index(None) + 1
         # Send all our sigs but the unvault one, until we are secured
         self.sigserver.send_signature(vault["emergency_tx"].GetTxid().hex(),
-                                      emer_sig, stk_id)
+                                      emer_sig)
         self.sigserver.send_signature(vault["cancel_tx"].GetTxid().hex(),
-                                      cancel_sig, stk_id)
+                                      cancel_sig)
         self.sigserver.send_signature(vault["unvault_emer_tx"].GetTxid().hex(),
-                                      unvault_emer_sig, stk_id)
+                                      unvault_emer_sig)
         self.vaults.append(vault)
 
     def remove_vault(self, utxo):
@@ -524,11 +524,10 @@ class Vault:
             spends = self.sigserver.get_spends()
             for txid in [txid for txid, address in spends.items()
                          if txid not in self.known_spends]:
-                stk_id = self.keychains.index(None) + 1
                 if spends[txid] not in self.acked_addresses:
-                    self.sigserver.refuse_spend(txid, spends[txid], stk_id)
+                    self.sigserver.refuse_spend(txid, spends[txid])
                 else:
-                    self.sigserver.accept_spend(txid, spends[txid], stk_id)
+                    self.sigserver.accept_spend(txid, spends[txid])
                 self.known_spends.append(txid)
 
     def update_emergency_signatures(self, vault):
@@ -647,10 +646,9 @@ class Vault:
             ))
             self.bitcoind.importaddress(unvault_addr, "unvault", False)
             # Who am I ?
-            stk_id = self.keychains.index(None) + 1
             self.sigserver.send_signature(vault["unvault_tx"].GetTxid().hex(),
-                                          vault["unvault_sigs"][stk_id - 1],
-                                          stk_id)
+                                          vault["unvault_sigs"][self.keychains
+                                                                .index(None)])
             self.update_unvault_transaction(vault)
 
     def update_all_signatures(self):

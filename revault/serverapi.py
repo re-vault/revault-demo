@@ -9,19 +9,19 @@ class ServerApi:
 
     Still called sigserver, but we'll use it for a number of things.
     """
-    def __init__(self, url):
+    def __init__(self, url, stk_id):
         """
         :param url: The url of the sigserver.
+        :param stk_id: Are we the 1st, 2nd, 3rd, or 4th stakeholder ?
         """
-        # FIXME stk_id
+        self.our_id = stk_id
         self.url = url
 
-    def send_signature(self, txid, sig, stk_id):
+    def send_signature(self, txid, sig):
         """Send a signature to the server.
 
         :param sig: The signature as bytes or str
         :param txid: The id of the transaction this transaction is for
-        :param stk_id: The id of the stakeholder this transaction is from
         """
         # FIXME txid
         if isinstance(sig, bytes):
@@ -29,11 +29,11 @@ class ServerApi:
         elif not isinstance(sig, str):
             raise Exception("The signature must be either bytes or a valid hex"
                             " string")
-        r = requests.post("{}/sig/{}/{}".format(self.url, txid, stk_id),
+        r = requests.post("{}/sig/{}/{}".format(self.url, txid, self.our_id),
                           data={"sig": sig})
         if not r.status_code == 201:
             raise Exception("stakeholder #{}: Could not send sig '{}' for"
-                            " txid {}.".format(stk_id, sig, txid))
+                            " txid {}.".format(self.our_id, sig, txid))
 
     def get_signature(self, txid, stk_id):
         """Request a signature to the signature server.
@@ -50,7 +50,7 @@ class ServerApi:
             return None
         else:
             raise Exception("Requesting stakeholder #{}'s signature for tx "
-                            "{}, response {}".format(stk_id, txid, r.text))
+                            "{}, response {}".format(self.our_id, txid, r.text))
 
     def get_feerate(self, tx_type, txid):
         """Get the feerate for the emergency transaction.
@@ -75,16 +75,16 @@ class ServerApi:
             raise Exception("The sigserver returned with '{}', saying '{}'"
                             .format(r.status_code, r.text))
 
-    def accept_spend(self, vault_txid, address, stk_id):
+    def accept_spend(self, vault_txid, address):
         r = requests.post("{}/acceptspend/{}/{}/{}"
-                          .format(self.url, vault_txid, address, stk_id))
+                          .format(self.url, vault_txid, address, self.our_id))
         if not r.status_code == 201 or not r.json()["success"]:
             raise Exception("The sigserver returned with '{}', saying '{}'"
                             .format(r.status_code, r.text))
 
-    def refuse_spend(self, vault_txid, address, stk_id):
+    def refuse_spend(self, vault_txid, address):
         r = requests.post("{}/refusespend/{}/{}/{}"
-                          .format(self.url, vault_txid, address, stk_id))
+                          .format(self.url, vault_txid, address, self.our_id))
         if not r.status_code == 201 or not r.json()["success"]:
             raise Exception("The sigserver returned with '{}', saying '{}'"
                             .format(r.status_code, r.text))
