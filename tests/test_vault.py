@@ -89,9 +89,9 @@ def test_emergency_sig_sharing(vault_factory):
     # Send new funds to it
     bitcoind.pay_to(vault.getnewaddress(), 10)
     wait_for(lambda: len(vault.vaults) == 1)
-    # We send then request it, hence if we succesfully requested it, we
-    # succesfully delivered it to the sig server
-    wait_for(lambda: len(vault.vaults[0]["emergency_sigs"]) > 0)
+    wait_for(lambda:
+             vault.vaults[0]["emergency_sigs"][vault.keychains.index(None)] is
+             not None)
 
 
 def test_emergency_tx_sync(vault_factory):
@@ -103,10 +103,11 @@ def test_emergency_tx_sync(vault_factory):
     # Sending funds to any vault address will be remarked by anyone
     for vault in vaults:
         bitcoind.pay_to(vault.getnewaddress(), 10)
-    for vault in vaults:
-        wait_for(lambda: len(vault.vaults) == len(vaults))
-        # FIXME: too much "vault" vars
-        wait_for(lambda: all(v["emergency_signed"] for v in vault.vaults))
+    wait_for(lambda: all(len(v.vaults) == len(vaults) for v in vaults))
+    # FIXME: too much "vault" vars
+    for wallet in vaults:
+        wait_for(lambda: all(vault["emergency_signed"]
+                             for vault in wallet.vaults))
     # All nodes should have the same emergency transactions
     for i in range(len(vaults) - 1):
         first_emer_txs = [v["emergency_tx"] for v in vaults[i].vaults]
@@ -177,10 +178,10 @@ def test_vault_address_reuse(vault_factory):
     # 3 - 1 + 3
     wait_for(lambda: all(len(trader.vaults) == 5 for trader in [trader_A,
                          trader_B]))
-    wait_for(lambda: all(v["emergency_signed"] and v["unvault_signed"]
-                         and v["unvault_secure"]
-                         for v in vault.vaults
-                         for trader in [trader_A, trader_B]))
+    for trader in [trader_A, trader_B]:
+        wait_for(lambda: all(v["emergency_signed"] and v["unvault_signed"]
+                             and v["unvault_secure"]
+                             for v in trader.vaults))
 
 
 def test_tx_chain_sync(vault_factory):
