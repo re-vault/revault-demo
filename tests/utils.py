@@ -413,14 +413,10 @@ class BitcoinD(TailableProc):
         self.proc.wait()
 
 
-class VaultFactory:
+class ServersManager:
     def __init__(self, bitcoind):
-        """Spin up some already connected vaults."""
-        # FIXME: use a bitcoind for each !!
+        """Set up the two servers used by the vault wallets."""
         self.bitcoind = bitcoind
-        self.bitcoind_fake_tx_load()
-        self.vaults = []
-        self.server_threads = []
         self.sigserver_port = reserve()
         self.cosigning_port = reserve()
 
@@ -449,9 +445,21 @@ class VaultFactory:
             "debug": False,
         }).start()
 
+        # The sig server needs feerate estimation
+        self.bitcoind_fake_tx_load()
+
+
+class VaultFactory:
+    def __init__(self, bitcoind, sigserver_port, cosigning_port):
+        """Spin up some already connected vaults."""
+        # FIXME: use a bitcoind for each !!
+        self.bitcoind = bitcoind
+        self.vaults = []
+        self.sigserver_port = sigserver_port
+        self.cosigning_port = cosigning_port
+
     def get_wallets(self, emergency_privkeys=None):
         """Get 4 vaults, one for each stakeholder. Spin up the servers."""
-        self.start_servers()
         bip32s = [BIP32.from_seed(os.urandom(32), "test") for _ in range(4)]
         xpubs = [bip32.get_master_xpub() for bip32 in bip32s]
         if emergency_privkeys is None:

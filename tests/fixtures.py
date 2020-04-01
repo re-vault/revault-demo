@@ -3,7 +3,7 @@ Most of the code here is stolen from C-lightning's test suite. This is surely
 Rusty Russell or Christian Decker who wrote most of this (I'd put some sats on
 cdecker), so credits to them ! (MIT licensed)
 """
-from utils import BitcoinD, VaultFactory
+from utils import BitcoinD, VaultFactory, ServersManager
 from revault import SigServer
 
 import logging
@@ -75,8 +75,18 @@ def bitcoind(directory):
 
 
 @pytest.fixture
-def vault_factory(bitcoind):
-    vault_factory = VaultFactory(bitcoind)
+def servers(bitcoind):
+    # FIXME: We really need different bitcoind..
+    servers_man = ServersManager(bitcoind)
+    servers_man.start_servers()
+
+    yield servers_man
+
+
+@pytest.fixture
+def vault_factory(servers, bitcoind):
+    vault_factory = VaultFactory(bitcoind, servers.sigserver_port,
+                                 servers.cosigning_port)
 
     yield vault_factory
 
