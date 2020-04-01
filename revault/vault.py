@@ -198,6 +198,15 @@ class Vault:
                 return index
         raise Exception("No such vault script with our known pubkeys !")
 
+    def watch_unvault(self, vault):
+        """Import the address of this vault's unvault tx to bitcoind."""
+        assert len(vault["unvault_tx"].vout) == 1
+        addr = str(CBitcoinAddress.from_scriptPubKey(
+            vault["unvault_tx"].vout[0].scriptPubKey
+        ))
+        self.unvault_addresses.append(addr)
+        self.bitcoind.importaddress(addr, "unvault", False)
+
     def create_sign_emergency(self, vault):
         """Create and return our signature for the vault emergency tx."""
         # Dummy amount to get the feerate..
@@ -317,6 +326,9 @@ class Vault:
         # Keep it for later
         vault["unvault_sigs"][self.keychains.index(None)] = \
             self.create_sign_unvault(vault)
+        # We need to be notified if the vault tx is broadcast, this is the easy
+        # way to do so.
+        self.watch_unvault(vault)
         cancel_sig = self.create_sign_cancel(vault)
         unvault_emer_sig = self.create_sign_unvault_emer(vault)
         # Send all our sigs but the unvault one, until we are secured
@@ -627,12 +639,6 @@ class Vault:
             self.vaults_lock.release()
             # We are about to send our commitment to the unvault, be sure to
             # know if funds are spent to it !
-            assert len(vault["unvault_tx"].vout) == 1
-            addr = str(CBitcoinAddress.from_scriptPubKey(
-                vault["unvault_tx"].vout[0].scriptPubKey
-            ))
-            self.unvault_addresses.append(addr)
-            self.bitcoind.importaddress(addr, "unvault", False)
             self.sigserver.send_signature(vault["unvault_tx"].GetTxid().hex(),
                                           vault["unvault_sigs"][self.keychains
                                                                 .index(None)])
