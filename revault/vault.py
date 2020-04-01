@@ -204,7 +204,8 @@ class Vault:
         addr = str(CBitcoinAddress.from_scriptPubKey(
             vault["unvault_tx"].vout[0].scriptPubKey
         ))
-        self.unvault_addresses.append(addr)
+        if addr not in self.unvault_addresses:
+            self.unvault_addresses.append(addr)
         self.bitcoind.importaddress(addr, "unvault", False)
 
     def create_sign_emergency(self, vault):
@@ -361,19 +362,30 @@ class Vault:
             known_outputs = [v["txid"] for v in self.vaults]
             new_vault_utxos = []
 
-            for utxo in self.bitcoind.listunspent():
-                if utxo["address"] in self.vault_addresses \
-                        and utxo["txid"] not in known_outputs:
-                    new_vault_utxos.append(utxo)
-                elif utxo["address"] == self.emergency_address:
+            for utxo in self.bitcoind.listunspent(
+                    minconf=1,
+                    addresses=[self.emergency_address]):
+                if utxo["address"] == self.emergency_address:
                     # FIXME: We should broadcast all our emergency transactions
                     # and die here.
                     self.vaults_lock.acquire()
                     self.remove_vault(utxo)
                     self.vaults_lock.release()
-                elif utxo["address"] in self.unvault_addresses:
-                    # FIXME: Broadcast the cancel if we don't know about the
-                    # spend.
+
+            if self.vault_addresses:
+                for utxo in self.bitcoind.listunspent(
+                        addresses=self.vault_addresses):
+                    if utxo["address"] in self.vault_addresses \
+                            and utxo["txid"] not in known_outputs:
+                        self.vaults_lock.acquire()
+                        new_vault_utxos.append(utxo)
+                        self.vaults_lock.release()
+
+            if self.unvault_addresses:
+                for utxo in self.bitcoind.listunspent(
+                        minconf=1,
+                        addresses=self.unvault_addresses):
+                    print(utxo)
                     self.vaults_lock.acquire()
                     self.remove_vault(utxo)
                     self.vaults_lock.release()
@@ -515,8 +527,6 @@ class Vault:
             for txid in [txid for txid, address in spends.items()
                          if txid not in self.known_spends]:
                 if spends[txid] not in self.acked_addresses:
-                    raise Exception("{}, {}".format(spends[txid],
-                                                    self.acked_addresses))
                     self.sigserver.refuse_spend(txid, spends[txid])
                 else:
                     self.sigserver.accept_spend(txid, spends[txid])

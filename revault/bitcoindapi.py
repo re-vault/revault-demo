@@ -64,9 +64,9 @@ class BitcoindApi:
                             "Descriptor: {}, result: {}"
                             .format(desc, str(res)))
 
-    def listunspent(self):
+    def listunspent(self, minconf=1, maxconf=9999999, addresses=None):
         self.bitcoind_lock.acquire()
-        utxos = self.bitcoind.listunspent()
+        utxos = self.bitcoind.listunspent(minconf, maxconf, addresses)
         self.bitcoind_lock.release()
         return utxos
 

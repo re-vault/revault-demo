@@ -24,7 +24,7 @@ BITCOIND_CONFIG = {
 }
 
 
-TIMEOUT = int(os.getenv("TIMEOUT", 60))
+TIMEOUT = int(os.getenv("TIMEOUT", 100))
 
 
 def wait_for(success, timeout=TIMEOUT):
