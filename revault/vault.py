@@ -89,6 +89,7 @@ class Vault:
         self.sigserver = ServerApi(sigserver_url, stk_id)
 
         self.vault_addresses = []
+        self.unvault_addresses = []
         self.update_watched_addresses()
 
         # We keep track of each vault, see below when we fill it for details
@@ -344,24 +345,9 @@ class Vault:
         construct the corresponding emergency transaction and spawn a thread
         to fetch emergency transactions signatures.
         """
-        while not self.funds_poller_stop.wait(5.0):
-            # FIXME: why cannot it be initialized like ([], ) * 4 ?
-            known_outputs = []
-            unvault_addresses = []
-            cancel_addresses = []
+        while not self.funds_poller_stop.wait(3.0):
+            known_outputs = [v["txid"] for v in self.vaults]
             new_vault_utxos = []
-            for v in self.vaults:
-                known_outputs.append(v["txid"])
-                unvault_addresses.append(
-                    str(CBitcoinAddress.from_scriptPubKey(
-                        v["unvault_tx"].vout[0].scriptPubKey
-                    ))
-                )
-                cancel_addresses.append(
-                    str(CBitcoinAddress.from_scriptPubKey(
-                        v["cancel_tx"].vout[0].scriptPubKey
-                    ))
-                )
 
             for utxo in self.bitcoind.listunspent():
                 if utxo["address"] in self.vault_addresses \
@@ -373,7 +359,7 @@ class Vault:
                     self.vaults_lock.acquire()
                     self.remove_vault(utxo)
                     self.vaults_lock.release()
-                elif utxo["address"] in unvault_addresses:
+                elif utxo["address"] in self.unvault_addresses:
                     # FIXME: Broadcast the cancel if we don't know about the
                     # spend.
                     self.vaults_lock.acquire()
@@ -642,10 +628,11 @@ class Vault:
             # We are about to send our commitment to the unvault, be sure to
             # know if funds are spent to it !
             assert len(vault["unvault_tx"].vout) == 1
-            unvault_addr = str(CBitcoinAddress.from_scriptPubKey(
+            addr = str(CBitcoinAddress.from_scriptPubKey(
                 vault["unvault_tx"].vout[0].scriptPubKey
             ))
-            self.bitcoind.importaddress(unvault_addr, "unvault", False)
+            self.unvault_addresses.append(addr)
+            self.bitcoind.importaddress(addr, "unvault", False)
             self.sigserver.send_signature(vault["unvault_tx"].GetTxid().hex(),
                                           vault["unvault_sigs"][self.keychains
                                                                 .index(None)])
