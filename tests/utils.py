@@ -216,15 +216,7 @@ class SimpleBitcoinProxy:
         proxy = BitcoinProxy(btc_conf_file=self.__btc_conf_file__)
 
         def f(*args):
-            try:
-                nonlocal proxy
-                res = proxy._call(name, *args)
-            except JSONRPCError:
-                del proxy
-                time.sleep(3)
-                proxy = BitcoinProxy(btc_conf_file=self.__btc_conf_file__)
-                res = proxy._call(name, *args)
-            return res
+            return proxy._call(name, *args)
 
         # Make debuggers show <function bitcoin.rpc.name> rather than <function
         # bitcoin.rpc.<lambda>>

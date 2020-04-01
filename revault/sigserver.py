@@ -1,5 +1,6 @@
 import bitcoin.rpc
 import threading
+import time
 
 from flask import Flask, jsonify, request, abort
 from decimal import Decimal
@@ -64,26 +65,20 @@ class SigServer:
 
             if txid not in self.feerates.keys():
                 if tx_type == "emergency":
-                    self.bitcoind_lock.acquire()
                     # We use 10* the conservative estimation at 2 block for
                     # such a crucial transaction
-                    feerate = self.bitcoind.estimatesmartfee(2, "CONSERVATIVE")
-                    self.bitcoind_lock.release()
-                    feerate["feerate"] *= Decimal(10)
+                    feerate = self.estimatefee_hack(2, "CONSERVATIVE")
+                    feerate *= Decimal(10)
                 elif tx_type == "cancel":
-                    self.bitcoind_lock.acquire()
                     # Another crucial transaction, but which is more likely to
                     # be broadcasted: a lower high feerate.
-                    feerate = self.bitcoind.estimatesmartfee(2, "CONSERVATIVE")
-                    self.bitcoind_lock.release()
-                    feerate["feerate"] *= Decimal(5)
+                    feerate = self.estimatefee_hack(2, "CONSERVATIVE")
+                    feerate *= Decimal(5)
                 else:
-                    self.bitcoind_lock.acquire()
                     # Not a crucial transaction (spend / unvault), but don't
                     # greed!
-                    feerate = self.bitcoind.estimatesmartfee(3, "CONSERVATIVE")
-                    self.bitcoind_lock.release()
-                self.feerates[txid] = feerate["feerate"]
+                    feerate = self.estimatefee_hack(3, "CONSERVATIVE")
+                self.feerates[txid] = feerate
 
             return jsonify({"feerate": float(self.feerates[txid])})
 
@@ -132,6 +127,19 @@ class SigServer:
         @self.server.route("/spendrequests", methods=["GET"])
         def spendrequests():
             return jsonify(self.spend_requests)
+
+    def estimatefee_hack(self, target, mode):
+        # FIXME, this is a hack !
+        self.bitcoind_lock.acquire()
+        try:
+            feerate = self.bitcoind.estimatesmartfee(target, mode)
+        except (ConnectionRefusedError, OSError):
+            time.sleep(1)
+            self.bitcoind = bitcoin.rpc.RawProxy(
+                btc_conf_file=self.bitcoind_conf_path)
+            feerate = self.bitcoind.estimatesmartfee(target, mode)
+        self.bitcoind_lock.release()
+        return feerate["feerate"]
 
     def test_client(self):
         return self.server.test_client()
