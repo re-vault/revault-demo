@@ -160,11 +160,13 @@ def test_vault_address_reuse(vault_factory):
     # FIXME hardcoded fees..
     spend_amount = 12 * COIN - 50000
     # We choose a valid address..
-    address = random.choice(trader_A.acked_addresses)
-    trader_A.initiate_spend(v, spend_amount, address)
-    sigB = trader_B.accept_spend(v["txid"], spend_amount, address)
+    addresses = {
+        random.choice(trader_A.acked_addresses): spend_amount,
+    }
+    trader_A.initiate_spend(v, spend_amount, addresses)
+    sigB = trader_B.accept_spend(v["txid"], addresses)
     pubkeyB = CKey(trader_B.vaults[0]["privkey"]).pub
-    tx = trader_A.complete_spend(v, pubkeyB, sigB, spend_amount, address)
+    tx = trader_A.complete_spend(v, pubkeyB, sigB, addresses)
     bitcoind.broadcast_and_mine(b2x(v["unvault_tx"].serialize()))
     # At this point we should have remarked the spend, and have either
     # broadcast the cancel_tx, or removed the vault.
@@ -259,19 +261,25 @@ def test_spend_creation(vault_factory):
 
     # Try to spend from the newly created vault
     vault = trader_A.vaults[0]
-    # FIXME harcoded amounts..
+    # FIXME hardcoded fees..
     spend_amount = 10 * COIN - 50000
-    # Choose a valid address
-    address = random.choice(trader_A.acked_addresses)
-    # The first trader creates the tx, signs it, pass both to B
-    trader_A.initiate_spend(vault, spend_amount, address)
+    # We choose a valid address..
+    addresses = {
+        random.choice(trader_A.acked_addresses): spend_amount,
+    }
+    # The first trader creates the tx, signs it, pass both the tx and sig to B
+    trader_A.initiate_spend(vault, addresses)
     # B hands his signature to A
-    sigB = trader_B.accept_spend(vault["txid"], spend_amount, address)
+    sigB = trader_B.accept_spend(vault["txid"], addresses)
     pubkeyB = CKey(trader_B.vaults[0]["privkey"]).pub
     # Then A forms the transaction and tells everyone, we can broadcast it.
-    tx = trader_A.complete_spend(vault, pubkeyB, sigB, spend_amount, address)
+    tx = trader_A.complete_spend(vault, pubkeyB, sigB, addresses)
     bitcoind.broadcast_and_mine(b2x(vault["unvault_tx"].serialize()))
+    # At this point we should have remarked the spend, and have either
+    # broadcast the cancel_tx, or removed the vault.
+    wait_for(lambda: all(len(trader.vaults) == 0 for trader in [trader_A,
+                         trader_B]))
+    # Generate 5 blocks for the locktime !
     addr = bitcoind.getnewaddress()
-    # Timelock
     bitcoind.generatetoaddress(5, addr)
     bitcoind.broadcast_and_mine(b2x(tx.serialize()))

@@ -357,22 +357,21 @@ def form_emer_unvault_tx(tx, sigs, pubkeys, pub_server):
     return form_unvault_spend(tx, sigs, pubkeys, pub_server)
 
 
-def create_spend_tx(unvault_txid, unvault_vout, value, address):
+def create_spend_tx(unvault_txid, unvault_vout, addresses):
     """Create the transaction which spends the unvault_tx after the relative
     locktime with the given private keys.
 
     :param unvault_txid: The id of the unvaulting transaction.
     :param unvault_vout: The index of the unvault output in this transaction.
-    :param address: The address to "send the coins to", we'll derive the
-                    scriptPubKey out of it.
-    :param value: The output value in satoshis.
+    :param addresses: A dictionary containing address as keys and amount to
+                      send in sats as value.
 
     :return: The unsigned transaction, a CMutableTransaction.
     """
-    # FIXME: handle the change !
-    txout = CTxOut(value, CBitcoinAddress(address).to_scriptPubKey())
+    txouts = [CTxOut(value, CBitcoinAddress(address).to_scriptPubKey())
+              for address, value in addresses.items()]
     txin = CTxIn(COutPoint(unvault_txid, unvault_vout), nSequence=6)
-    return CMutableTransaction([txin], [txout], nVersion=2)
+    return CMutableTransaction([txin], txouts, nVersion=2)
 
 
 def sign_spend_tx(tx, privkeys, pubkeys, pub_server, prev_value):

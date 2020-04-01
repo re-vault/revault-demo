@@ -50,7 +50,8 @@ class ServerApi:
             return None
         else:
             raise Exception("Requesting stakeholder #{}'s signature for tx "
-                            "{}, response {}".format(self.our_id, txid, r.text))
+                            "{}, response {}".format(self.our_id, txid,
+                                                     r.text))
 
     def get_feerate(self, tx_type, txid):
         """Get the feerate for the emergency transaction.
@@ -68,9 +69,11 @@ class ServerApi:
         # Explicit conversion to sat per virtual byte
         return int(btc_perkvb * Decimal(COIN) / Decimal(1000))
 
-    def request_spend(self, vault_txid, address):
-        r = requests.post("{}/requestspend/{}/{}".format(self.url, vault_txid,
-                                                         address))
+    def request_spend(self, vault_txid, addresses):
+        r = requests.post("{}/requestspend".format(self.url), json={
+            "vault_txid": vault_txid,
+            "addresses": addresses,
+        })
         if not r.status_code == 201 or not r.json()["success"]:
             raise Exception("The sigserver returned with '{}', saying '{}'"
                             .format(r.status_code, r.text))

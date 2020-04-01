@@ -385,7 +385,6 @@ class Vault:
                 for utxo in self.bitcoind.listunspent(
                         minconf=1,
                         addresses=self.unvault_addresses):
-                    print(utxo)
                     self.vaults_lock.acquire()
                     self.remove_vault(utxo)
                     self.vaults_lock.release()
@@ -428,8 +427,9 @@ class Vault:
                 break
             time.sleep(0.5)
 
-    def create_sign_spend_tx(self, vault, value, address):
-        """Create and sign a spend tx which sends {value} sats to {address}.
+    def create_sign_spend_tx(self, vault, addresses):
+        """Create and sign a spend tx which creates a len({address}.keys())
+        outputs transaction.
 
         :return: Our signature for this transaction.
         """
@@ -438,40 +438,41 @@ class Vault:
         unvault_txid = vault["unvault_tx"].GetTxid()
         unvault_value = vault["unvault_tx"].vout[0].nValue
         assert len(vault["unvault_tx"].vout) == 1
-        spend_tx = create_spend_tx(unvault_txid, 0, value, address)
+        spend_tx = create_spend_tx(unvault_txid, 0, addresses)
         # We use the same pubkeys for the unvault and for the vault
         sigs = sign_spend_tx(spend_tx, [vault["privkey"]], vault["pubkeys"],
                              self.cosigner_pubkey, unvault_value)
         return sigs[0]
 
-    def initiate_spend(self, vault, value, address):
+    def initiate_spend(self, vault, addresses):
         """First step to spend, we sign it before handing it to our peer.
 
         :param vault: The vault to spend, an entry of self.vaults[]
         :param value: How many sats to spend.
-        :param address: Where to send those sats.
+        :param addresses: A dictionary containing address as keys and amount to
+                          send in sats as value.
 
         :return: Our signature for this spend transaction.
         """
-        return self.create_sign_spend_tx(vault, value, address)
+        return self.create_sign_spend_tx(vault, addresses)
 
-    def accept_spend(self, vault_txid, value, address):
+    def accept_spend(self, vault_txid, addresses):
         """We were handed a signature for a spend tx.
         Recreate it, sign it and give our signature to our peer.
 
         :param vault_txid: The txid of the vault to spend from.
-        :param value: How many sats to spend.
-        :param address: Where to send those sats.
+        :param addresses: A dictionary containing address as keys and amount to
+                          send in sats as value.
 
         :return: Our signature for this spend transaction, or None if we don't
                  know about this vault.
         """
         for vault in self.vaults:
             if vault["txid"] == vault_txid:
-                return self.create_sign_spend_tx(vault, value, address)
+                return self.create_sign_spend_tx(vault, addresses)
         return None
 
-    def complete_spend(self, vault, peer_pubkey, peer_sig, value, address):
+    def complete_spend(self, vault, peer_pubkey, peer_sig, addresses):
         """Our fellow trader also signed the spend, now ask the cosigner and
         notify other stakeholders we are about to spend a vault. We wait
         synchronously for their response, once again an assumption that's
@@ -480,20 +481,20 @@ class Vault:
         :param vault: The vault to spend, an entry of self.vaults[]
         :param peer_pubkey: The other peer's pubkey.
         :param peer_sig: A signature for this spend_tx with the above pubkey.
-        :param value: How many sats to spend.
-        :param address: Where to send those sats.
+        :param addresses: A dictionary containing address as keys and amount to
+                          send in sats as value.
 
         :return: The fully signed transaction.
         """
-        our_sig = self.create_sign_spend_tx(vault, value, address)
+        our_sig = self.create_sign_spend_tx(vault, addresses)
         unvault_txid = vault["unvault_tx"].GetTxid()
         assert len(vault["unvault_tx"].vout) == 1
         unvault_value = vault["unvault_tx"].vout[0].nValue
         cosig = \
-            self.cosigner.get_signature(unvault_txid[::-1].hex(),
-                                        [p.hex() for p in vault["pubkeys"]],
-                                        address, value, unvault_value)
-        spend_tx = create_spend_tx(unvault_txid, 0, value, address)
+            self.cosigner.get_cosignature(unvault_txid[::-1].hex(),
+                                          vault["pubkeys"], addresses,
+                                          unvault_value)
+        spend_tx = create_spend_tx(unvault_txid, 0, addresses)
         # Now the fun part, correctly reconstruct the script
         all_sigs = [bytes(0)] * 3 + [cosig]
         our_pos = vault["pubkeys"].index(CKey(vault["privkey"]).pub)
@@ -504,7 +505,7 @@ class Vault:
                                  self.cosigner_pubkey, all_sigs)
 
         # Notify others
-        self.sigserver.request_spend(vault["txid"], address)
+        self.sigserver.request_spend(vault["txid"], addresses)
         # Wait for their response, keep it simple..
         while True:
             res = self.sigserver.spend_accepted(vault["txid"])
@@ -524,12 +525,24 @@ class Vault:
         """
         while not self.spends_poller_stop.wait(3.0):
             spends = self.sigserver.get_spends()
-            for txid in [txid for txid, address in spends.items()
+            for txid in [txid for txid, addresses in spends.items()
                          if txid not in self.known_spends]:
-                if spends[txid] not in self.acked_addresses:
-                    self.sigserver.refuse_spend(txid, spends[txid])
-                else:
+                # This monstruous pattern is unavailable to my tired brain in a
+                # hurry..
+                accept = False
+                for address in spends[txid]:
+                    if address in self.vault_addresses:
+                        # This is the change !
+                        continue
+                    if address in self.acked_addresses:
+                        accept = True
+                    else:
+                        accept = False
+                        break
+                if accept:
                     self.sigserver.accept_spend(txid, spends[txid])
+                else:
+                    self.sigserver.refuse_spend(txid, spends[txid])
                 self.known_spends.append(txid)
 
     def update_emergency_signatures(self, vault):

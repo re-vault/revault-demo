@@ -29,7 +29,7 @@ class SigServer:
         # A dictionary to store each stakeholder acceptance to a spend,
         # represented as a list of four booleans.
         self.spend_acceptance = {}
-        # A dictionary to store each spend destination by txid.
+        # A dictionary to store each spend destinations by txid.
         self.spend_requests = {}
         self.setup_routes()
 
@@ -82,15 +82,17 @@ class SigServer:
 
             return jsonify({"feerate": float(self.feerates[txid])})
 
-        @self.server.route("/requestspend/<string:vault_txid>"
-                           "/<string:address>", methods=["POST"])
-        def request_spend(vault_txid, address):
+        @self.server.route("/requestspend", methods=["POST"])
+        def request_spend():
             """Request to spend this vault to this address.
 
-            This is called by the spend initiator to advertise its willing.
+            This is called by the spend initiator to advertise its will.
             """
-            self.spend_requests[vault_txid] = address
-            self.spend_acceptance[vault_txid] = [None, None, None, None]
+            params = request.get_json()
+
+            txid = params["vault_txid"]
+            self.spend_requests[txid] = params["addresses"]
+            self.spend_acceptance[txid] = [None, None, None, None]
 
             return jsonify({"success": True}), 201
 
