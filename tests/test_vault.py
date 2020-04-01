@@ -49,7 +49,6 @@ def test_sigserver(bitcoind, sigserv):
 
 def test_sigserver_feerate(vault_factory):
     """We just test that it gives us a (valid) feerate."""
-    # FIXME: Test that it sends the same feerate with same txid
     vault = vault_factory.get_vaults()[0]
     # GET emergency feerate
     feerate = vault.sigserver.get_feerate("emergency", txid="high_entropy")
@@ -126,6 +125,7 @@ def test_emergency_broadcast(vault_factory):
     for vault in vaults:
         for _ in range(2):
             bitcoind.pay_to(vault.getnewaddress(), 10)
+    wait_for(lambda: all(len(v.vaults) == 2 * len(vaults) for v in vaults))
     wait_for(lambda: all(v["emergency_signed"] for v in vault.vaults))
     vault = random.choice(vaults)
     for tx in [v["emergency_tx"] for v in vault.vaults]:
@@ -137,18 +137,50 @@ def test_vault_address_reuse(vault_factory):
     """Test that we are still safe if coins are sent to an already used vault.
     """
     vaults = vault_factory.get_vaults()
+    trader_A = vaults[0]
     # FIXME: separate the Bitcoin backends !!
-    bitcoind = vaults[0].bitcoind
-    vault = random.choice(vaults)
-    address = vault.getnewaddress()
-    # Concurrent send to the same address should be fine
-    for _ in range(5):
-        bitcoind.pay_to(address, 12)
-    wait_for(lambda: len(vault.vaults) == 5)
+    bitcoind = trader_A.bitcoind
+    reused_address = trader_A.getnewaddress()
+    # Concurrent sends to the same address should be fine
+    for _ in range(3):
+        bitcoind.pay_to(reused_address, 12)
+    wait_for(lambda: len(trader_A.vaults) == 3)
     for vault in vaults:
         wait_for(lambda: all(v["emergency_signed"] and v["unvault_signed"]
                              and v["unvault_secure"] for v in vault.vaults))
-    # FIXME: When spend is implemented test address reuse after spend
+
+    # Now test address reuse after a vault has been spent
+    # We'll spend this one
+    v = random.choice(trader_A.vaults)
+    # And the second trader will sign with us the spend
+    trader_B = vaults[1]
+    # FIXME hardcoded fees..
+    spend_amount = 12 * COIN - 50000
+    # We choose a valid address..
+    address = random.choice(trader_A.acked_addresses)
+    trader_A.initiate_spend(v, spend_amount, address)
+    sigB = trader_B.accept_spend(v["txid"], spend_amount, address)
+    pubkeyB = CKey(trader_B.vaults[0]["privkey"]).pub
+    tx = trader_A.complete_spend(v, pubkeyB, sigB, spend_amount, address)
+    bitcoind.broadcast_and_mine(b2x(v["unvault_tx"].serialize()))
+    # At this point we should have remarked the spend, and have either
+    # broadcast the cancel_tx, or removed the vault.
+    wait_for(lambda: all(len(trader.vaults) == 2 for trader in [trader_A,
+                         trader_B]))
+    # Generate 5 blocks for the locktime !
+    addr = bitcoind.getnewaddress()
+    bitcoind.generatetoaddress(5, addr)
+    bitcoind.broadcast_and_mine(b2x(tx.serialize()))
+    # Creating new vaults should to this address should still be fine
+    for _ in range(3):
+        bitcoind.pay_to(reused_address, 8)
+    # 3 - 1 + 3
+    wait_for(lambda: all(len(trader.vaults) == 5 for trader in [trader_A,
+                         trader_B]))
+    wait_for(lambda: all(v["emergency_signed"] and v["unvault_signed"]
+                         and v["unvault_secure"]
+                         for v in vault.vaults
+                         for trader in [trader_A, trader_B]))
 
 
 def test_tx_chain_sync(vault_factory):
