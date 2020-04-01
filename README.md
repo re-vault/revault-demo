@@ -16,5 +16,5 @@ python3 setup.py install
 # Install the tests dependencies
 pip install -r tests/requirements.txt
 # Run the test suite
-pytest -vvv tests/ -n4
+pytest -vvv tests/
 ```

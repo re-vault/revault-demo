@@ -358,7 +358,7 @@ class Vault:
         construct the corresponding emergency transaction and spawn a thread
         to fetch emergency transactions signatures.
         """
-        while not self.funds_poller_stop.wait(3.0):
+        while not self.funds_poller_stop.wait(5.0):
             known_outputs = [v["txid"] for v in self.vaults]
             new_vault_utxos = []
 
@@ -541,7 +541,7 @@ class Vault:
         txid = vault["emergency_tx"].GetTxid().hex()
         # Poll until finished, or master tells us to stop
         while None in vault["emergency_sigs"]:
-            if self.update_sigs_stop.wait(1.0):
+            if self.update_sigs_stop.wait(3.0):
                 break
             for i in range(1, 5):
                 if vault["emergency_sigs"][i - 1] is None:
@@ -568,7 +568,7 @@ class Vault:
         txid = vault["unvault_emer_tx"].GetTxid().hex()
         # Poll until finished, or master tells us to stop
         while None in vault["unvault_emer_sigs"]:
-            if self.update_sigs_stop.wait(1.0):
+            if self.update_sigs_stop.wait(3.0):
                 break
             for i in range(1, 5):
                 if vault["unvault_emer_sigs"][i - 1] is None:
@@ -592,7 +592,7 @@ class Vault:
         txid = vault["cancel_tx"].GetTxid().hex()
         # Poll until finished, or master tells us to stop
         while None in vault["cancel_sigs"]:
-            if self.update_sigs_stop.wait(1.0):
+            if self.update_sigs_stop.wait(3.0):
                 break
             for i in range(1, 5):
                 if vault["cancel_sigs"][i - 1] is None:
@@ -615,7 +615,7 @@ class Vault:
         txid = vault["unvault_tx"].GetTxid().hex()
         # Poll until finished, or master tells us to stop
         while None in vault["unvault_sigs"]:
-            if self.update_sigs_stop.wait(1.0):
+            if self.update_sigs_stop.wait(3.0):
                 break
             for i in range(1, 5):
                 if vault["unvault_sigs"][i - 1] is None:
