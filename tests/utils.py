@@ -449,7 +449,7 @@ class VaultFactory:
             "debug": False,
         }).start()
 
-    def get_vaults(self, emergency_privkeys=None):
+    def get_wallets(self, emergency_privkeys=None):
         """Get 4 vaults, one for each stakeholder. Spin up the servers."""
         self.start_servers()
         bip32s = [BIP32.from_seed(os.urandom(32), "test") for _ in range(4)]
