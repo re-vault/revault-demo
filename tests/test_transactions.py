@@ -280,7 +280,7 @@ def test_spend_unvault_tx_two_traders(bitcoind):
     amount_spend = amount_unvault - 500
     # The address to spend to
     addr = bitcoind.getnewaddress()
-    CTx = create_spend_tx(txid, 0, amount_spend, addr)
+    CTx = create_spend_tx(txid, 0, {addr: amount_spend})
     # The first two stakeholders are the traders
     sigs = sign_spend_tx(CTx, stk_privkeys[:2], stk_pubkeys, serv_pubkey,
                          amount_unvault)
@@ -318,7 +318,7 @@ def test_spend_unvault_tx_trader_second_trader(bitcoind):
     amount_spend = amount_unvault - 500
     # The address to spend to
     addr = bitcoind.getnewaddress()
-    CTx = create_spend_tx(txid, 0, amount_spend, addr)
+    CTx = create_spend_tx(txid, 0, {addr: amount_spend})
     # The first two stakeholders are the traders
     sigs = sign_spend_tx(CTx, stk_privkeys[1:3], stk_pubkeys,
                          serv_pubkey, amount_unvault)
@@ -357,7 +357,7 @@ def test_spend_unvault_tx_trader_A(bitcoind):
 
     # The address to spend to
     addr = bitcoind.getnewaddress()
-    CTx = create_spend_tx(txid, 0, amount_spend, addr)
+    CTx = create_spend_tx(txid, 0, {addr: amount_spend})
     # The first two stakeholders are the traders
     sigs = sign_spend_tx(CTx, [stk_privkeys[0], stk_privkeys[2]],
                          stk_pubkeys, serv_pubkey, amount_unvault)
