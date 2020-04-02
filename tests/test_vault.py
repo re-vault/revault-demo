@@ -163,7 +163,7 @@ def test_vault_address_reuse(vault_factory):
     addresses = {
         random.choice(trader_A.acked_addresses): spend_amount,
     }
-    trader_A.initiate_spend(v, spend_amount, addresses)
+    trader_A.initiate_spend(v, addresses)
     sigB = trader_B.accept_spend(v["txid"], addresses)
     pubkeyB = CKey(trader_B.vaults[0]["privkey"]).pub
     tx = trader_A.complete_spend(v, pubkeyB, sigB, addresses)

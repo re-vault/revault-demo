@@ -196,7 +196,14 @@ class Vault:
         for index in range(self.max_index):
             if vault_address == self.get_vault_address(index):
                 return index
-        raise Exception("No such vault script with our known pubkeys !")
+        return None
+
+    def get_vault_from_unvault(self, txid):
+        """Get the vault corresponding to this unvault transaction."""
+        for v in self.vaults:
+            if lx(v["unvault_tx"].GetTxid()) == txid:
+                return v
+        return None
 
     def watch_unvault(self, vault):
         """Import the address of this vault's unvault tx to bitcoind."""
@@ -320,6 +327,8 @@ class Vault:
             "unvault_secure": False,
         }
         index = self.guess_index(vault["address"])
+        if index is None:
+            raise Exception("No such vault script with our known pubkeys !")
         vault["pubkeys"] = self.get_pubkeys(index)
         vault["privkey"] = self.our_bip32.get_privkey_from_path([index])
 
@@ -372,19 +381,24 @@ class Vault:
                     self.remove_vault(utxo)
                     self.vaults_lock.release()
 
-            if self.vault_addresses:
-                for utxo in self.bitcoind.listunspent(
-                        addresses=self.vault_addresses):
-                    if utxo["address"] in self.vault_addresses \
-                            and utxo["txid"] not in known_outputs:
-                        self.vaults_lock.acquire()
-                        new_vault_utxos.append(utxo)
-                        self.vaults_lock.release()
+            for utxo in self.bitcoind.listunspent(
+                    addresses=self.vault_addresses):
+                if utxo["address"] in self.vault_addresses \
+                        and utxo["txid"] not in known_outputs:
+                    self.vaults_lock.acquire()
+                    new_vault_utxos.append(utxo)
+                    self.vaults_lock.release()
 
             if self.unvault_addresses:
                 for utxo in self.bitcoind.listunspent(
                         minconf=1,
                         addresses=self.unvault_addresses):
+                    if utxo["txid"] not in self.known_spends:
+                        vault = self.get_vault_from_unvault(utxo["txid"])
+                        assert vault is not None
+                        self.bitcoind.sendrawtransaction(vault["cancel_tx"]
+                                                         .serialize().hex())
+                        # FIXME wait for it to be mined ?
                     self.vaults_lock.acquire()
                     self.remove_vault(utxo)
                     self.vaults_lock.release()
