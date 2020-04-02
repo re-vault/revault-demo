@@ -27,6 +27,7 @@ class BitcoindApi:
         :param birthdate: The timestamp at which the keys were created.
         """
         desc = "wsh(multi(4,{},{},{},{}))".format(*pubkeys)
+        self.bitcoind_lock.acquire()
         # No checksum, we are only ever called at startup before any thread
         checksum = self.bitcoind.getdescriptorinfo(desc)["checksum"]
         res = self.bitcoind.importmulti([{
@@ -35,8 +36,9 @@ class BitcoindApi:
             "watchonly": True,
             "label": "revault_emergency_vault"
         }])
+        self.bitcoind_lock.release()
         if not res[0]["success"]:
-            raise Exception("Failed to import emergency pubkeys. "
+            raise Exception("Failed to import the 4-of-4 P2WSH. "
                             "Descriptor: {}, result: {}"
                             .format(desc, str(res)))
 
@@ -64,9 +66,10 @@ class BitcoindApi:
                             "Descriptor: {}, result: {}"
                             .format(desc, str(res)))
 
-    def listunspent(self, minconf=1, maxconf=9999999, addresses=None):
+    def listunspent(self, minconf=1, maxconf=9999999, addresses=None,
+                    unsafe=True):
         self.bitcoind_lock.acquire()
-        utxos = self.bitcoind.listunspent(minconf, maxconf, addresses)
+        utxos = self.bitcoind.listunspent(minconf, maxconf, addresses, unsafe)
         self.bitcoind_lock.release()
         return utxos
 
