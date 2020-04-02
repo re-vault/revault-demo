@@ -569,26 +569,24 @@ class Vault:
         # Poll until finished, or master tells us to stop
         while None in vault["emergency_sigs"]:
             if self.update_sigs_stop.wait(3.0):
-                break
+                return
             for i in range(1, 5):
                 if vault["emergency_sigs"][i - 1] is None:
                     self.vaults_lock.acquire()
                     vault["emergency_sigs"][i - 1] = \
                         self.sigserver.get_signature(txid, i)
                     self.vaults_lock.release()
-        # Only populate the sigs if we got them all, not if master told us to
-        # stop.
-        if None not in vault["emergency_sigs"]:
-            self.vaults_lock.acquire()
-            vault["emergency_tx"] = \
-                form_emergency_vault_tx(vault["emergency_tx"],
-                                        vault["pubkeys"],
-                                        vault["emergency_sigs"])
-            vault["emergency_signed"] = True
-            self.vaults_lock.release()
-            self.bitcoind.assertmempoolaccept([
-                vault["emergency_tx"].serialize().hex()
-            ])
+
+        self.vaults_lock.acquire()
+        vault["emergency_tx"] = \
+            form_emergency_vault_tx(vault["emergency_tx"],
+                                    vault["pubkeys"],
+                                    vault["emergency_sigs"])
+        vault["emergency_signed"] = True
+        self.vaults_lock.release()
+        self.bitcoind.assertmempoolaccept([
+            vault["emergency_tx"].serialize().hex()
+        ])
 
     def update_unvault_emergency(self, vault):
         """Poll the signature server for the unvault_emergency tx signature"""
@@ -596,7 +594,7 @@ class Vault:
         # Poll until finished, or master tells us to stop
         while None in vault["unvault_emer_sigs"]:
             if self.update_sigs_stop.wait(3.0):
-                break
+                return
             for i in range(1, 5):
                 if vault["unvault_emer_sigs"][i - 1] is None:
                     self.vaults_lock.acquire()
@@ -604,15 +602,13 @@ class Vault:
                         self.sigserver.get_signature(txid, i)
                     self.vaults_lock.release()
 
-        # Only populate the sigs if we got them all, not if we were stopped.
-        if None not in vault["unvault_emer_sigs"]:
-            self.vaults_lock.acquire()
-            vault["unvault_emer_tx"] = \
-                form_emer_unvault_tx(vault["unvault_emer_tx"],
-                                     vault["unvault_emer_sigs"],
-                                     vault["pubkeys"],
-                                     self.cosigner_pubkey)
-            self.vaults_lock.release()
+        self.vaults_lock.acquire()
+        vault["unvault_emer_tx"] = \
+            form_emer_unvault_tx(vault["unvault_emer_tx"],
+                                 vault["unvault_emer_sigs"],
+                                 vault["pubkeys"],
+                                 self.cosigner_pubkey)
+        self.vaults_lock.release()
 
     def update_cancel_unvault(self, vault):
         """Poll the signature server for the cancel_unvault tx signature"""
@@ -620,7 +616,7 @@ class Vault:
         # Poll until finished, or master tells us to stop
         while None in vault["cancel_sigs"]:
             if self.update_sigs_stop.wait(3.0):
-                break
+                return
             for i in range(1, 5):
                 if vault["cancel_sigs"][i - 1] is None:
                     self.vaults_lock.acquire()
@@ -628,14 +624,12 @@ class Vault:
                         self.sigserver.get_signature(txid, i)
                     self.vaults_lock.release()
 
-        # Only populate the sigs if we got them all, not if we were stopped.
-        if None not in vault["cancel_sigs"]:
-            self.vaults_lock.acquire()
-            vault["cancel_tx"] = form_cancel_tx(vault["cancel_tx"],
-                                                vault["cancel_sigs"],
-                                                vault["pubkeys"],
-                                                self.cosigner_pubkey)
-            self.vaults_lock.release()
+        self.vaults_lock.acquire()
+        vault["cancel_tx"] = form_cancel_tx(vault["cancel_tx"],
+                                            vault["cancel_sigs"],
+                                            vault["pubkeys"],
+                                            self.cosigner_pubkey)
+        self.vaults_lock.release()
 
     def update_unvault_transaction(self, vault):
         """Get others' sig for the unvault transaction"""
@@ -643,7 +637,7 @@ class Vault:
         # Poll until finished, or master tells us to stop
         while None in vault["unvault_sigs"]:
             if self.update_sigs_stop.wait(3.0):
-                break
+                return
             for i in range(1, 5):
                 if vault["unvault_sigs"][i - 1] is None:
                     self.vaults_lock.acquire()
@@ -651,18 +645,12 @@ class Vault:
                         self.sigserver.get_signature(txid, i)
                     self.vaults_lock.release()
 
-        # Only populate the sigs if we got them all, not if we were stopped.
-        if None not in vault["unvault_sigs"]:
-            self.vaults_lock.acquire()
-            vault["unvault_tx"] = form_unvault_tx(vault["unvault_tx"],
-                                                  vault["pubkeys"],
-                                                  vault["unvault_sigs"])
-            vault["unvault_signed"] = True
-            self.vaults_lock.release()
-            self.bitcoind.assertmempoolaccept([
-                # We can't test the cancel and the emer_unvault..
-                vault["unvault_tx"].serialize().hex(),
-            ])
+        self.vaults_lock.acquire()
+        vault["unvault_tx"] = form_unvault_tx(vault["unvault_tx"],
+                                              vault["pubkeys"],
+                                              vault["unvault_sigs"])
+        vault["unvault_signed"] = True
+        self.vaults_lock.release()
 
     def update_unvault_revocations(self, vault):
         """Don't stop polling the sig server until we have all the revocation
