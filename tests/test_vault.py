@@ -117,8 +117,8 @@ def test_emergency_tx_sync(vault_factory):
 
 
 def test_emergency_broadcast(vault_factory):
-    """Test that all the emergency transactions we create are valid and can be
-    broadcast."""
+    """Test that the emergency transactions we create are valid and can be
+    broadcast. Test that if one is broadcast, all are."""
     wallets = vault_factory.get_wallets()
     # FIXME: separate the Bitcoin backends !!
     bitcoind = wallets[0].bitcoind
@@ -127,13 +127,12 @@ def test_emergency_broadcast(vault_factory):
         for _ in range(2):
             bitcoind.pay_to(wallet.getnewaddress(), 10)
     for wallet in wallets:
-        wait_for(lambda: all(len(wallet.vaults) == 2 * len(wallets)
-                             for wallet in wallets))
+        wait_for(lambda: len(wallet.vaults) == 2 * len(wallets))
         wait_for(lambda: all(v["emergency_signed"] for v in wallet.vaults))
     wallet = random.choice(wallets)
-    for tx in [v["emergency_tx"] for v in wallet.vaults]:
-        bitcoind.broadcast_and_mine(b2x(tx.serialize()))
-    wait_for(lambda: len(wallet.vaults) == 0)
+    vault = random.choice(wallet.vaults)
+    bitcoind.broadcast_and_mine(vault["emergency_tx"].serialize().hex())
+    wait_for(lambda: wallet.stopped)
 
 
 def test_vault_address_reuse(vault_factory):

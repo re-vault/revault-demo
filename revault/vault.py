@@ -201,7 +201,7 @@ class Vault:
     def get_vault_from_unvault(self, txid):
         """Get the vault corresponding to this unvault transaction."""
         for v in self.vaults:
-            if lx(v["unvault_tx"].GetTxid()) == txid:
+            if v["unvault_tx"].GetTxid() == lx(txid):
                 return v
         return None
 
@@ -372,14 +372,21 @@ class Vault:
             new_vault_utxos = []
 
             for utxo in self.bitcoind.listunspent(
-                    minconf=1,
+                    minconf=0,
                     addresses=[self.emergency_address]):
-                if utxo["address"] == self.emergency_address:
-                    # FIXME: We should broadcast all our emergency transactions
-                    # and die here.
-                    self.vaults_lock.acquire()
-                    self.remove_vault(utxo)
-                    self.vaults_lock.release()
+                for v in self.vaults:
+                    # FIXME: do something if not, like "hey you lost your
+                    # fund"
+                    if v["emergency_signed"]:
+                        try:
+                            self.bitcoind.sendrawtransaction(
+                                v["emergency_tx"].serialize().hex())
+                        except bitcoin.rpc.VerifyAlreadyInChainError:
+                            pass
+                        # FIXME: wait for it to be mined ?
+                    # Game over.
+                    self.stopped = True
+                    return
 
             for utxo in self.bitcoind.listunspent(
                     addresses=self.vault_addresses):
