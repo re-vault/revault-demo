@@ -14,25 +14,24 @@ This repo is a basic and insecure PoC.
 ### The architecture
 
 Revault is a vault architecture designed for securing the storage **and usage** of
-consequent amount of bitcoins held my multiple parties (such as managers of an investment fund).
+significant amount of bitcoins held my multiple parties (such as managers of an investment fund).
 
-It aims at discouraging a theft in the first place as much as preventing it by going further a
-simple N-of-N multisig between the stakeholders where they either have full control over
-the multisig (and there is a strong incentive to try to theft them as there is a high
-chance to get full control over the coins), or they share this power to a trusted third party,
-on which they rely for a non-trivial amount of money.
+It aims at discouraging a theft as much as preventing it by going further than a
+simple N-of-N multisig where:
+- the stakeholders have full control over the multisig (a strong attack incentive as there is a high
+chance to get full control over the coins)
+- or they share this power with a trusted third party on which they rely for a non-trivial amount.
 
-It does not protect about intentional locking of funds (key erasure, for example, or
-refusal to sign), and thus targets users who are able to resolve this kind of problems outside
-the Bitcoin network (such as court, say).
+This architecture does not protect about intentional locking of funds (key erasure, for example, or
+refusal to sign) and thus targets users who are able to resolve this kind of problems outside
+the Bitcoin network (such as through the legal system).
 
-Finally, it keeps some flexibility as it allows some of the stakeholders to emit
-day-to-day transactions without requiring the whole N holders to verify and sign.
+Finally, it keeps some flexibility as it allows a subset of the stakeholders to emit day-to-day transactions without requiring all N holders to verify and sign.
 
-The trick is to use N-of-N vaults for receiving funds, and to pre-sign at reception a
+The trick is to use N-of-N vaults for receiving funds and to pre-sign at reception a
 so-called "emergency transaction" which sends funds to a "deep vault", i.e. a timelocked N-of-N
 with N different keys [1].
-At fund reception are also signed 3 other transactions:
+At fund reception, 3 other transactions are also signed:
 - The unvaulting transaction, which spends a vault output and spends to a relatively-timelocked
     M-of-N output OR to a N-of-N composed of the keys used for the initial vault.
 - The cancel transaction, which spends an unvaulting transaction and sends back the
@@ -54,9 +53,9 @@ to access and geographically distant.
 This PoC (/ demo / whatever insecure) is an implementation of such an architecture for 4
 stakeholders (to simulate the needs of the first client, see below).
 
-Currently WIP it serves both to demonstrate the operation of a re-vault in
-practice with a big emphasis on being explicit and clear instead of secure (hence Python),
-and to hopefully convince some people that it's worth financing the development of Revault
+Currently a WIP, it serves to both:
+- demonstrate the operation of a re-vault in practice with a big emphasis on being explicit and clear instead of secure (hence Python),
+- to hopefully convince some people that it's worth financing the development of Revault
 (but we need a nice GUI before this :/).
 
 I tried to document as much as possible, begining with the [transactions](doc/transactions.md).
@@ -65,7 +64,7 @@ Everything is in the [doc/](doc/) directory, which I'll try to fill with more in
 ### Improvements
 
 Of course, both the architecture and the demo are still in active development, and may
-(read will) be perfected in the near future !
+(read will) be perfected in the near future!
 
 My focus is currently the feerate problem.
 
