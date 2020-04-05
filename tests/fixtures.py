@@ -65,6 +65,19 @@ def test_name(request):
 
 
 @pytest.fixture
+def bitcoind(directory):
+    bitcoind = BitcoinD(bitcoin_dir=directory)
+    bitcoind.startup()
+
+    while bitcoind.rpc.getbalance() < 50:
+        bitcoind.rpc.generatetoaddress(1, bitcoind.getnewaddress())
+
+    yield bitcoind
+
+    bitcoind.cleanup()
+
+
+@pytest.fixture
 def bitcoinds(directory):
     # FIXME: do it in a less hacky manner
     n_bitcoind = 5
