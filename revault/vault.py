@@ -388,26 +388,30 @@ class Vault:
                     self.stopped = True
                     return
 
+            if self.unvault_addresses:
+                for utxo in self.bitcoind.listunspent(
+                        minconf=0,
+                        addresses=self.unvault_addresses):
+                    vault = self.get_vault_from_unvault(utxo["txid"])
+                    assert vault is not None
+                    if vault["txid"] not in self.known_spends:
+                        try:
+                            self.bitcoind.sendrawtransaction(
+                                vault["cancel_tx"].serialize().hex()
+                            )
+                        except bitcoin.rpc.VerifyAlreadyInChainError:
+                            pass
+                        # FIXME wait for it to be mined ?
+                    self.vaults_lock.acquire()
+                    self.remove_vault(utxo)
+                    self.vaults_lock.release()
+
             for utxo in self.bitcoind.listunspent(
                     addresses=self.vault_addresses):
                 if utxo["address"] in self.vault_addresses \
                         and utxo["txid"] not in known_outputs:
                     self.vaults_lock.acquire()
                     new_vault_utxos.append(utxo)
-                    self.vaults_lock.release()
-
-            if self.unvault_addresses:
-                for utxo in self.bitcoind.listunspent(
-                        minconf=1,
-                        addresses=self.unvault_addresses):
-                    if utxo["txid"] not in self.known_spends:
-                        vault = self.get_vault_from_unvault(utxo["txid"])
-                        assert vault is not None
-                        self.bitcoind.sendrawtransaction(vault["cancel_tx"]
-                                                         .serialize().hex())
-                        # FIXME wait for it to be mined ?
-                    self.vaults_lock.acquire()
-                    self.remove_vault(utxo)
                     self.vaults_lock.release()
 
             for output in new_vault_utxos:
