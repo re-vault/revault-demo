@@ -1,4 +1,5 @@
 import bitcoin
+import pytest
 import random
 
 from bip32 import BIP32
@@ -159,26 +160,26 @@ def test_vault_address_reuse(vault_factory):
     trader_A.initiate_spend(v, addresses)
     sigB = trader_B.accept_spend(v["txid"], addresses)
     pubkeyB = CKey(trader_B.vaults[0]["privkey"]).pub
-    tx = trader_A.complete_spend(v, pubkeyB, sigB, addresses)
+    tx, spend_accepted = trader_A.complete_spend(v, pubkeyB, sigB, addresses)
+    assert spend_accepted
     bitcoind.broadcast_and_mine(b2x(v["unvault_tx"].serialize()))
-    # At this point we should have remarked the spend, and have either
-    # broadcast the cancel_tx, or removed the vault.
-    wait_for(lambda: all(len(trader.vaults) == 2 for trader in [trader_A,
-                         trader_B]))
+    # At this point we should have remarked the spend, and have removed the
+    # vault.
+    wait_for(lambda: all(len(wallet.vaults) == 2 for wallet in wallets))
     # Generate 5 blocks for the locktime !
     addr = bitcoind.getnewaddress()
     bitcoind.generatetoaddress(5, addr)
     bitcoind.broadcast_and_mine(b2x(tx.serialize()))
-    # Creating new vaults should to this address should still be fine
+    # Creating new vaults to this address should still be fine
     for _ in range(3):
         bitcoind.pay_to(reused_address, 8)
     # 3 - 1 + 3
-    wait_for(lambda: all(len(trader.vaults) == 5 for trader in [trader_A,
-                         trader_B]))
-    for trader in [trader_A, trader_B]:
-        wait_for(lambda: all(v["emergency_signed"] and v["unvault_signed"]
-                             and v["unvault_secure"]
-                             for v in trader.vaults))
+    wait_for(lambda: all(len(wallet.vaults) == 5 for wallet in wallets))
+    for wallet in wallets:
+        # Separated for reseting the timeout
+        wait_for(lambda: all(v["emergency_signed"] for v in wallet.vaults))
+        wait_for(lambda: all(v["unvault_signed"] for v in wallet.vaults))
+        assert all(v["unvault_secure"] for v in wallet.vaults)
 
 
 def test_tx_chain_sync(vault_factory):
@@ -198,7 +199,6 @@ def test_tx_chain_sync(vault_factory):
     vault = random.choice(wallets)
     for v in vault.vaults:
         bitcoind.broadcast_and_mine(b2x(v["unvault_tx"].serialize()))
-    wait_for(lambda: all(len(w.vaults) == 0 for w in wallets))
 
 
 def test_cancel_unvault(vault_factory):
@@ -239,7 +239,8 @@ def test_cancel_unvault(vault_factory):
 
 def test_spend_creation(vault_factory):
     """Test that the signature exchange between the traders and cosigner leads
-    to a well-formed spend_tx."""
+    to a well-formed spend_tx, and that sending to an unknown address will make
+    everyone broadcast their cancel tx."""
     wallets = vault_factory.get_wallets()
     trader_A, trader_B = wallets[0], wallets[1]
     bitcoind = trader_A.bitcoind
@@ -263,13 +264,52 @@ def test_spend_creation(vault_factory):
     sigB = trader_B.accept_spend(vault["txid"], addresses)
     pubkeyB = CKey(trader_B.vaults[0]["privkey"]).pub
     # Then A forms the transaction and tells everyone, we can broadcast it.
-    tx = trader_A.complete_spend(vault, pubkeyB, sigB, addresses)
+    tx, accepted = trader_A.complete_spend(vault, pubkeyB, sigB, addresses)
+    assert accepted
     bitcoind.broadcast_and_mine(b2x(vault["unvault_tx"].serialize()))
-    # At this point we should have remarked the spend, and have either
-    # broadcast the cancel_tx, or removed the vault.
-    wait_for(lambda: all(len(trader.vaults) == 0 for trader in [trader_A,
-                         trader_B]))
+    # At this point we should have remarked the spend, and have removed
+    # the vault.
+    wait_for(lambda: all(len(w.vaults) == 0 for w in wallets))
     # Generate 5 blocks for the locktime !
     addr = bitcoind.getnewaddress()
     bitcoind.generatetoaddress(5, addr)
     bitcoind.broadcast_and_mine(b2x(tx.serialize()))
+
+    # Now try to spend to an unauthorized address
+    bitcoind.pay_to(trader_A.getnewaddress(), 10)
+    wait_for(lambda: all(len(w.vaults) == 1 for w in wallets))
+    for wallet in wallets:
+        wait_for(lambda: all(v["emergency_signed"] for v in wallet.vaults))
+        wait_for(lambda: all(v["unvault_signed"] for v in wallet.vaults))
+        assert all(v["unvault_secure"] for v in wallet.vaults)
+    # We spend this one!
+    vault = trader_A.vaults[0]
+    # We reuse the same hardcoded amount, and a new address
+    addresses = {
+        bitcoind.getnewaddress(): spend_amount,
+    }
+    # The first trader creates the tx, signs it, pass both the tx and sig to B
+    trader_A.initiate_spend(vault, addresses)
+    # B hands his signature to A
+    sigB = trader_B.accept_spend(vault["txid"], addresses)
+    pubkeyB = CKey(trader_B.vaults[0]["privkey"]).pub
+    # Then A forms the transaction and tells everyone, we can broadcast it.
+    tx, accepted = trader_A.complete_spend(vault, pubkeyB, sigB, addresses)
+    assert not accepted
+    first_vault_txid = vault["txid"]
+    bitcoind.broadcast_and_mine(b2x(vault["unvault_tx"].serialize()))
+    # At this point we should have remarked the spend, and have broadcast the
+    # cancel_tx. This means still len(vaults) == 1, but a different one !
+    # So, we need to wait for everyone to remove the first vault, then add the
+    # second one, but all wallets aren't doing it synchronously ! That's going
+    # to be hacky. From my tests the 4th wallet is the last to be updated.
+    # wait_for(lambda: len(wallets[3].vaults) == 0)
+    # wait_for(lambda: len(wallets[3].vaults) == 1)
+    wait_for(lambda: all(len(wallet.vaults) == 1 for wallet in wallets))
+    wait_for(lambda: all(wallet.vaults[0]["txid"] != first_vault_txid if
+                         len(wallet.vaults) > 0 else False
+                         for wallet in wallets))
+    bitcoind.generatetoaddress(5, addr)
+    with pytest.raises(bitcoin.rpc.VerifyError,
+                       match="bad-txns-inputs-missingorspent"):
+        bitcoind.broadcast_and_mine(b2x(tx.serialize()))

@@ -109,7 +109,7 @@ class Vault:
 
         # Poll for spends until we die
         self.acked_addresses = acked_addresses
-        self.known_spends = []
+        self.acked_spends = []
         self.spends_poller_stop = threading.Event()
         self.spends_poller = threading.Thread(target=self.poll_for_spends,
                                               daemon=True)
@@ -393,20 +393,22 @@ class Vault:
                         minconf=0,
                         addresses=self.unvault_addresses):
                     vault = self.get_vault_from_unvault(utxo["txid"])
-                    assert vault is not None
-                    if vault["txid"] not in self.known_spends:
-                        try:
-                            self.bitcoind.sendrawtransaction(
-                                vault["cancel_tx"].serialize().hex()
-                            )
-                        except bitcoin.rpc.VerifyAlreadyInChainError:
-                            pass
-                        # FIXME wait for it to be mined ?
-                    self.vaults_lock.acquire()
-                    self.remove_vault(utxo)
-                    self.vaults_lock.release()
+                    # If None, we already removed it!
+                    if vault is not None:
+                        if vault["txid"] not in self.acked_spends:
+                            try:
+                                self.bitcoind.sendrawtransaction(
+                                    vault["cancel_tx"].serialize().hex()
+                                )
+                            except bitcoin.rpc.VerifyAlreadyInChainError:
+                                pass
+                            # FIXME wait for it to be mined ?
+                        self.vaults_lock.acquire()
+                        self.remove_vault(utxo)
+                        self.vaults_lock.release()
 
             for utxo in self.bitcoind.listunspent(
+                    minconf=0,
                     addresses=self.vault_addresses):
                 if utxo["address"] in self.vault_addresses \
                         and utxo["txid"] not in known_outputs:
@@ -509,7 +511,8 @@ class Vault:
         :param addresses: A dictionary containing address as keys and amount to
                           send in sats as value.
 
-        :return: The fully signed transaction.
+        :return: A tuple, the fully signed transaction, and whether the spend
+                 is accepted
         """
         our_sig = self.create_sign_spend_tx(vault, addresses)
         unvault_txid = vault["unvault_tx"].GetTxid()
@@ -534,24 +537,22 @@ class Vault:
         # Wait for their response, keep it simple..
         while True:
             res = self.sigserver.spend_accepted(vault["txid"])
-            if res:
+            if res is not None:
                 break
-            # May also be None !
-            elif res is False:
-                raise Exception("Spend rejected.")
             time.sleep(0.5)
 
-        return spend_tx
+        return spend_tx, res
 
     def poll_for_spends(self):
         """Poll the sigserver for spend requests.
 
         Accept the spend if now the spend, refuse otherwise.
         """
+        known_spends = []
         while not self.spends_poller_stop.wait(3.0):
             spends = self.sigserver.get_spends()
             for txid in [txid for txid, addresses in spends.items()
-                         if txid not in self.known_spends]:
+                         if txid not in known_spends]:
                 # This monstruous pattern is unavailable to my tired brain in a
                 # hurry..
                 accept = False
@@ -566,9 +567,10 @@ class Vault:
                         break
                 if accept:
                     self.sigserver.accept_spend(txid, spends[txid])
+                    self.acked_spends.append(txid)
                 else:
                     self.sigserver.refuse_spend(txid, spends[txid])
-                self.known_spends.append(txid)
+                known_spends.append(txid)
 
     def update_emergency_signatures(self, vault):
         """Don't stop polling the sig server until we have all the sigs.
