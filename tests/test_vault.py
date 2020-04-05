@@ -13,7 +13,6 @@ bitcoin.SelectParams("regtest")
 
 def test_vault_address(vault_factory):
     wallets = vault_factory.get_wallets()
-    # FIXME: separate the Bitcoin backends !!
     bitcoind = wallets[0].bitcoind
     for wallet in wallets:
         # It's burdensome to our xpub to be None in the list, but it allows us
@@ -31,7 +30,7 @@ def test_vault_address(vault_factory):
             assert wallet_first_address == bitcoind_first_address
 
 
-def test_sigserver(bitcoind, sigserv):
+def test_sigserver(sigserv):
     """We just test that it stores sigs correctly."""
     sig = "a01f"
     txid = "0101"
@@ -65,7 +64,6 @@ def test_signatures_posting(vault_factory):
 def test_funds_polling(vault_factory):
     """Test that we are aware of the funds we receive."""
     wallet = vault_factory.get_wallets()[0]
-    # FIXME: separate the Bitcoin backends !!
     bitcoind = wallet.bitcoind
     assert len(wallet.vaults) == 0
     # Send new funds to it
@@ -83,7 +81,6 @@ def test_funds_polling(vault_factory):
 def test_emergency_sig_sharing(vault_factory):
     """Test that we share the emergency transaction signature."""
     wallet = vault_factory.get_wallets()[0]
-    # FIXME: separate the Bitcoin backends !!
     bitcoind = wallet.bitcoind
     assert len(wallet.vaults) == 0
     # Send new funds to it
@@ -98,7 +95,6 @@ def test_emergency_tx_sync(vault_factory):
     """Test that we correctly share and gather emergency transactions
     signatures."""
     wallets = vault_factory.get_wallets()
-    # FIXME: separate the Bitcoin backends !!
     bitcoind = wallets[0].bitcoind
     # Sending funds to any vault address will be remarked by anyone
     for wallet in wallets:
@@ -120,7 +116,6 @@ def test_emergency_broadcast(vault_factory):
     """Test that the emergency transactions we create are valid and can be
     broadcast. Test that if one is broadcast, all are."""
     wallets = vault_factory.get_wallets()
-    # FIXME: separate the Bitcoin backends !!
     bitcoind = wallets[0].bitcoind
     # Sending funds to any vault address will be remarked by anyone
     for wallet in wallets:
@@ -140,7 +135,6 @@ def test_vault_address_reuse(vault_factory):
     """
     wallets = vault_factory.get_wallets()
     trader_A = wallets[0]
-    # FIXME: separate the Bitcoin backends !!
     bitcoind = trader_A.bitcoind
     reused_address = trader_A.getnewaddress()
     # Concurrent sends to the same address should be fine
@@ -190,7 +184,6 @@ def test_vault_address_reuse(vault_factory):
 def test_tx_chain_sync(vault_factory):
     """Test all vaults will exchange signatures for all transactions"""
     wallets = vault_factory.get_wallets()
-    # FIXME: separate the Bitcoin backends !!
     bitcoind = wallets[0].bitcoind
     # Sending funds to any vault address will be remarked by anyone
     for wallet in wallets:
@@ -211,7 +204,6 @@ def test_tx_chain_sync(vault_factory):
 def test_cancel_unvault(vault_factory):
     """Test the unvault cancelation (cancel_tx *AND* emer_unvault_tx)"""
     wallets = vault_factory.get_wallets()
-    # FIXME: separate the Bitcoin backends !!
     bitcoind = wallets[0].bitcoind
     # Sending funds to any vault address will be remarked by anyone
     for wallet in wallets:
@@ -250,8 +242,7 @@ def test_spend_creation(vault_factory):
     to a well-formed spend_tx."""
     wallets = vault_factory.get_wallets()
     trader_A, trader_B = wallets[0], wallets[1]
-    # FIXME: separate the Bitcoin backends !!
-    bitcoind = trader_B.bitcoind
+    bitcoind = trader_A.bitcoind
     bitcoind.pay_to(trader_A.getnewaddress(), 10)
     wait_for(lambda: all(len(w.vaults) == 1 for w in wallets))
     wait_for(lambda: all(v["emergency_signed"] for v in trader_A.vaults))

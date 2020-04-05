@@ -3,7 +3,7 @@ Most of the code here is stolen from C-lightning's test suite. This is surely
 Rusty Russell or Christian Decker who wrote most of this (I'd put some sats on
 cdecker), so credits to them ! (MIT licensed)
 """
-from utils import BitcoinD, VaultFactory, ServersManager
+from utils import BitcoinD, VaultFactory, ServersManager, wait_for
 from revault import SigServer
 
 import logging
@@ -65,38 +65,54 @@ def test_name(request):
 
 
 @pytest.fixture
-def bitcoind(directory):
-    bitcoind = BitcoinD(bitcoin_dir=directory)
-    bitcoind.startup()
+def bitcoinds(directory):
+    # FIXME: do it in a less hacky manner
+    n_bitcoind = 5
+    bitcoinds = [BitcoinD(bitcoin_dir="{}/{}".format(directory, i))
+                 for i in range(n_bitcoind)]
 
-    yield bitcoind
+    for bitcoind in bitcoinds:
+        bitcoind.startup()
 
-    bitcoind.cleanup()
+    # Connect everyone..
+    for bit in bitcoinds:
+        for i in range(len(bitcoinds)):
+            bit.rpc.addnode("127.0.0.1:{}".format(bitcoinds[i]
+                                                  .p2pport), "add")
+
+    wait_for(lambda: all(bit.rpc.getconnectioncount() > 3
+                         for bit in bitcoinds))
+
+    # Hand some funds to everyone
+    rounds = 101 // n_bitcoind + 1
+    for _ in range(rounds):
+        for bitcoind in bitcoinds:
+            bitcoind.rpc.generatetoaddress(1, bitcoind.rpc.getnewaddress())
+            blockcount = bitcoind.rpc.getblockcount()
+            wait_for(lambda: all(bit.rpc.getblockcount() == blockcount
+                                 for bit in bitcoinds))
+
+    yield bitcoinds
+
+    for bitcoind in bitcoinds:
+        bitcoind.cleanup()
 
 
 @pytest.fixture
-def servers(bitcoind):
-    # FIXME: We really need different bitcoind..
-    servers_man = ServersManager(bitcoind)
+def vault_factory(bitcoinds):
+    servers_man = ServersManager(bitcoinds[0])
     servers_man.start_servers()
-
-    yield servers_man
-
-
-@pytest.fixture
-def vault_factory(servers, bitcoind):
-    vault_factory = VaultFactory(bitcoind, servers.sigserver_port,
-                                 servers.cosigning_port)
+    vault_factory = VaultFactory(bitcoinds[1:5], servers_man.sigserver_port,
+                                 servers_man.cosigning_port)
 
     yield vault_factory
 
     for vault in vault_factory.vaults:
         vault.stop()
-    bitcoind.cleanup()
 
 
 @pytest.fixture
-def sigserv(bitcoind):
-    sigserver = SigServer(bitcoind.conf_file)
+def sigserv(bitcoinds):
+    sigserver = SigServer(bitcoinds[0].conf_file)
     with sigserver.test_client() as client:
         yield client

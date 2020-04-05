@@ -142,6 +142,8 @@ class BitcoindApi:
     def pay_to(self, address, amount):
         """A helper for the functional tests.."""
         self.bitcoind_lock.acquire()
+        while self.bitcoind.getbalance() < amount + 1:
+            self.bitcoind.generatetoaddress(1, self.bitcoind.getnewaddress())
         txid = self.bitcoind.sendtoaddress(address, amount)
         self.mine(txid)
         self.bitcoind_lock.release()

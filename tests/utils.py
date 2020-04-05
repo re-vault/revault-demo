@@ -233,6 +233,7 @@ class BitcoinD(TailableProc):
 
         self.bitcoin_dir = bitcoin_dir
         self.rpcport = rpcport
+        self.p2pport = reserve()
         self.prefix = 'bitcoind'
 
         regtestdir = os.path.join(bitcoin_dir, 'regtest')
@@ -245,7 +246,6 @@ class BitcoinD(TailableProc):
             '-printtoconsole',
             '-server',
             '-logtimestamps',
-            '-nolisten',
             '-txindex',
             '-addresstype=bech32',
             '-rpcthreads=16',
@@ -254,7 +254,11 @@ class BitcoinD(TailableProc):
         BITCOIND_CONFIG['rpcport'] = rpcport
         # For after 0.16.1 (eg. 3f398d7a17f136cd4a67998406ca41a124ae2966), this
         # needs its own [regtest] section.
-        BITCOIND_REGTEST = {'rpcport': rpcport}
+        BITCOIND_REGTEST = {
+            'port': self.p2pport,
+            'rpcport': rpcport,
+            'debug': 1,
+        }
         self.conf_file = os.path.join(bitcoin_dir, 'bitcoin.conf')
         write_config(self.conf_file, BITCOIND_CONFIG, BITCOIND_REGTEST)
         self.rpc = SimpleBitcoinProxy(btc_conf_file=self.conf_file)
@@ -389,14 +393,6 @@ class BitcoinD(TailableProc):
                              " (v0.16.0) is needed, current version is {}"
                              .format(info['version']))
 
-        info = self.rpc.getblockchaininfo()
-        # Make sure we have some spendable funds
-        if info['blocks'] < 101:
-            self.generate_block(101 - info['blocks'])
-        elif self.rpc.getwalletinfo()['balance'] < 1:
-            logging.debug("Insufficient balance, generating 1 block")
-            self.generate_block(1)
-
     def cleanup(self):
         try:
             self.stop()
@@ -415,11 +411,6 @@ class ServersManager:
     def bitcoind_fake_tx_load(self):
         """Simulate a fake load of transactions to fill fee estimation
         buckets."""
-        while "feerate" not in self.bitcoind.rpc.estimatesmartfee(10):
-            addr = self.bitcoind.rpc.getnewaddress()
-            for _ in range(10):
-                self.bitcoind.rpc.sendtoaddress(addr, 1)
-            self.bitcoind.rpc.generatetoaddress(1, addr)
 
     def start_servers(self):
         """Starts the sig and cosigning servers."""
@@ -437,15 +428,11 @@ class ServersManager:
             "debug": False,
         }).start()
 
-        # The sig server needs feerate estimation
-        self.bitcoind_fake_tx_load()
-
 
 class VaultFactory:
-    def __init__(self, bitcoind, sigserver_port, cosigning_port):
+    def __init__(self, bitcoinds, sigserver_port, cosigning_port):
         """Spin up some already connected vaults."""
-        # FIXME: use a bitcoind for each !!
-        self.bitcoind = bitcoind
+        self.bitcoinds = bitcoinds
         self.vaults = []
         self.sigserver_port = sigserver_port
         self.cosigning_port = cosigning_port
@@ -459,10 +446,10 @@ class VaultFactory:
         emergency_pubkeys = [k.pub for k in emergency_privkeys]
         self.vaults = []
         # Generate some random 'OK' addresses
-        acked_addresses = [self.bitcoind.getnewaddress() for _ in range(5)]
+        acked_addresses = [self.bitcoinds[0].getnewaddress() for _ in range(5)]
         for bip32 in bip32s:
             xpriv = bip32.get_master_xpriv()
-            conf = self.bitcoind.rpc.__btc_conf_file__
+            conf = self.bitcoinds[bip32s.index(bip32)].rpc.__btc_conf_file__
             cosigner_url = "http://localhost:{}".format(self.cosigning_port)
             sigserv_url = "http://localhost:{}".format(self.sigserver_port)
             self.vaults.append(Vault(xpriv, xpubs, emergency_pubkeys, conf,

@@ -1,6 +1,6 @@
+import bitcoin
 import bitcoin.rpc
 import threading
-import time
 
 from flask import Flask, jsonify, request, abort
 from decimal import Decimal
@@ -133,15 +133,11 @@ class SigServer:
     def estimatefee_hack(self, target, mode):
         # FIXME, this is a hack !
         self.bitcoind_lock.acquire()
-        try:
-            feerate = self.bitcoind.estimatesmartfee(target, mode)
-        except (ConnectionRefusedError, OSError):
-            time.sleep(1)
-            self.bitcoind = bitcoin.rpc.RawProxy(
-                btc_conf_file=self.bitcoind_conf_path)
-            feerate = self.bitcoind.estimatesmartfee(target, mode)
+        feerate = self.bitcoind.estimatesmartfee(target, mode)
         self.bitcoind_lock.release()
-        return feerate["feerate"]
+        if "feerate" in feerate:
+            return feerate["feerate"]
+        return Decimal(1000) / bitcoin.core.COIN
 
     def test_client(self):
         return self.server.test_client()
