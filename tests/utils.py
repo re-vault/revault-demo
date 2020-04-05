@@ -4,11 +4,13 @@ Rusty Russell or Christian Decker who wrote most of this (I'd put some sats on
 cdecker), so credits to them ! (MIT licensed)
 """
 from bip32 import BIP32
-from bitcoin.rpc import RawProxy as BitcoinProxy, JSONRPCError
+from bitcoin.rpc import RawProxy as BitcoinProxy
 from bitcoin.wallet import CKey
+from decimal import Decimal
 from ephemeral_port_reserve import reserve
 from revault import Vault, SigServer, CosigningServer
 
+import bitcoin
 import logging
 import os
 import re
@@ -258,6 +260,7 @@ class BitcoinD(TailableProc):
             'port': self.p2pport,
             'rpcport': rpcport,
             'debug': 1,
+            'fallbackfee': Decimal(1000) / bitcoin.core.COIN,
         }
         self.conf_file = os.path.join(bitcoin_dir, 'bitcoin.conf')
         write_config(self.conf_file, BITCOIND_CONFIG, BITCOIND_REGTEST)
@@ -407,10 +410,6 @@ class ServersManager:
         self.bitcoind = bitcoind
         self.sigserver_port = reserve()
         self.cosigning_port = reserve()
-
-    def bitcoind_fake_tx_load(self):
-        """Simulate a fake load of transactions to fill fee estimation
-        buckets."""
 
     def start_servers(self):
         """Starts the sig and cosigning servers."""
