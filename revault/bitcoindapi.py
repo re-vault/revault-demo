@@ -20,28 +20,6 @@ class BitcoindApi:
         """Close the connection to bitcoind."""
         self.bitcoind.close()
 
-    def importmulti(self, pubkeys, birthdate):
-        """Import a 4-of-4 P2WSH descriptor.
-
-        :param pubkeys: The pubkeys to construct the 4-of-4.
-        :param birthdate: The timestamp at which the keys were created.
-        """
-        desc = "wsh(multi(4,{},{},{},{}))".format(*pubkeys)
-        self.bitcoind_lock.acquire()
-        # No checksum, we are only ever called at startup before any thread
-        checksum = self.bitcoind.getdescriptorinfo(desc)["checksum"]
-        res = self.bitcoind.importmulti([{
-            "desc": "{}#{}".format(desc, checksum),
-            "timestamp": birthdate,
-            "watchonly": True,
-            "label": "revault_emergency_vault"
-        }])
-        self.bitcoind_lock.release()
-        if not res[0]["success"]:
-            raise Exception("Failed to import the 4-of-4 P2WSH. "
-                            "Descriptor: {}, result: {}"
-                            .format(desc, str(res)))
-
     def importmultiextended(self, xpubs, birthdate, min_index, max_index):
         """Import a 4-of-4 P2WSH descriptor with 4 xpubs (m/0).
 

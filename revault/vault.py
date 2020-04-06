@@ -151,8 +151,9 @@ class Vault:
 
     def watch_emergency_vault(self):
         """There is only one emergency script"""
-        pubkeys = [pub.hex() for pub in self.emergency_pubkeys]
-        self.bitcoind.importmulti(pubkeys, self.birthdate)
+        script = emergency_txout(self.emergency_pubkeys, COIN).scriptPubKey
+        addr = CBitcoinAddress.from_scriptPubKey(script)
+        self.bitcoind.importaddress(str(addr), "revault_emergency")
 
     def update_watched_addresses(self):
         """Update the watchonly addresses"""
@@ -394,6 +395,7 @@ class Vault:
                         addresses=self.unvault_addresses):
                     vault = self.get_vault_from_unvault(utxo["txid"])
                     # If None, we already removed it!
+                    # FIXME: Doing so is unnecessarily resource-insentive
                     if vault is not None:
                         if vault["txid"] not in self.acked_spends:
                             try:
@@ -460,7 +462,6 @@ class Vault:
 
         :return: Our signature for this transaction.
         """
-        # FIXME: the change !!
         self.wait_for_unvault_tx(vault)
         unvault_txid = vault["unvault_tx"].GetTxid()
         unvault_value = vault["unvault_tx"].vout[0].nValue
