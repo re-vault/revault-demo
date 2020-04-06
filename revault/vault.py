@@ -367,78 +367,98 @@ class Vault:
         If we just went to know of the possession of a new output, it will
         construct the corresponding emergency transaction and spawn a thread
         to fetch emergency transactions signatures.
+
+        Note that this main loop used to be somewhat less naïvely implemented,
+        but it was both a premature and useless optimisation.
         """
         while not self.funds_poller_stop.wait(5.0):
+            # What we think we have
             known_outputs = [v["txid"] for v in self.vaults]
-            new_vault_utxos = []
+            # What bitcoind tells we *actually* have
+            current_utxos = self.bitcoind.listunspent(
+                minconf=0,
+                addresses=self.vault_addresses
+            )
+            current_utxos_id = [u["txid"] for u in current_utxos]
+            spent_vaults = [v for v in self.vaults
+                            if v["txid"] not in current_utxos_id]
+            new_vaults = [u for u in current_utxos
+                          if u["txid"] not in known_outputs]
 
-            for utxo in self.bitcoind.listunspent(
-                    minconf=0,
-                    addresses=[self.emergency_address]):
-                for v in self.vaults:
-                    # FIXME: do something if not, like "hey you lost your
-                    # fund"
-                    if v["emergency_signed"]:
-                        try:
-                            self.bitcoind.sendrawtransaction(
-                                v["emergency_tx"].serialize().hex())
-                        except bitcoin.rpc.VerifyAlreadyInChainError:
-                            pass
-                        try:
-                            self.bitcoind.sendrawtransaction(
-                                v["unvault_emer_tx"].serialize().hex())
-                        except bitcoin.rpc.VerifyError:
-                            # Missing inputs
-                            pass
-                        # FIXME: wait for it to be mined ?
+            for v in spent_vaults:
+                # Is it an emergency broadcast ?
+                if self.bitcoind.listunspent(
+                    minconf=0, addresses=[self.emergency_address]
+                ):
                     # Game over.
-                    self.stopped = True
-                    return
-
-            if self.unvault_addresses:
-                for utxo in self.bitcoind.listunspent(
-                        minconf=0,
-                        addresses=self.unvault_addresses):
-                    vault = self.get_vault_from_unvault(utxo["txid"])
-                    # If None, we already removed it!
-                    # FIXME: Doing so is unnecessarily resource-insentive
-                    if vault is not None:
-                        if vault["txid"] not in self.acked_spends:
+                    for v in self.vaults:
+                        if v["emergency_signed"]:
                             try:
                                 self.bitcoind.sendrawtransaction(
-                                    vault["cancel_tx"].serialize().hex()
-                                )
+                                    v["emergency_tx"].serialize().hex())
                             except bitcoin.rpc.VerifyAlreadyInChainError:
                                 pass
-                            # FIXME wait for it to be mined ?
-                        self.vaults_lock.acquire()
-                        self.remove_vault(utxo)
-                        self.vaults_lock.release()
+                            try:
+                                self.bitcoind.sendrawtransaction(
+                                    v["unvault_emer_tx"].serialize().hex())
+                            except bitcoin.rpc.VerifyError:
+                                # Missing inputs
+                                pass
+                            # FIXME: wait for it to be mined ?
+                        self.stopped = True
+                        return
 
-            for utxo in self.bitcoind.listunspent(
+                # If not, it must be an unvault broadcast !
+                unvault_addr = CBitcoinAddress.from_scriptPubKey(
+                    v["unvault_tx"].vout[0].scriptPubKey
+                )
+                unvault_utxos = self.bitcoind.listunspent(
                     minconf=0,
-                    addresses=self.vault_addresses):
-                if utxo["address"] in self.vault_addresses \
-                        and utxo["txid"] not in known_outputs:
-                    self.vaults_lock.acquire()
-                    new_vault_utxos.append(utxo)
-                    self.vaults_lock.release()
+                    addresses=[str(unvault_addr)]
+                )
+                print(unvault_utxos)
+                if len(unvault_utxos) == 0:
+                    # Maybe someone has already broadcast the cancel
+                    # transaction
+                    cancel_addr = CBitcoinAddress.from_scriptPubKey(
+                        v["cancel_tx"].vout[0].scriptPubKey
+                    )
+                    assert len(self.bitcoind.listunspent(
+                        minconf=0,
+                        addresses=[str(cancel_addr)]
+                    )) > 0
+                else:
+                    if v["txid"] not in self.acked_spends:
+                        try:
+                            self.bitcoind.sendrawtransaction(
+                                v["cancel_tx"].serialize().hex()
+                            )
+                        except bitcoin.rpc.VerifyAlreadyInChainError:
+                            pass
+                        # FIXME wait for it to be mined ?
 
-            for output in new_vault_utxos:
+            # These were unvaulted
+            if len(spent_vaults) > 0:
                 self.vaults_lock.acquire()
-                self.add_new_vault(output)
+                self.vaults = [v for v in self.vaults
+                               if v not in spent_vaults]
                 self.vaults_lock.release()
-                # Do a new bunch of watchonly imports if we get closer to the
-                # maximum index we originally derived.
+
+            for utxo in new_vaults:
+                self.vaults_lock.acquire()
+                self.add_new_vault(utxo)
+                self.vaults_lock.release()
+                # Do a new bunch of watchonly imports if we get closer to
+                # the maximum index we originally derived.
                 # FIXME: This doesn't take address reuse into account
                 self.current_index += 1
                 self.max_index += 1
                 if self.current_index > self.index_treshold - 20:
                     self.update_watched_addresses()
 
-            if len(new_vault_utxos) > 0:
-                # Ok we updated our owned outputs, restart the transactions
-                # signatures fetcher with the updated list of vaults.
+            # If we had new coins, restart the transactions signatures fetcher
+            # with the updated list of vaults.
+            if len(new_vaults) > 0:
                 self.update_sigs_stop.set()
                 try:
                     self.update_sigs_thread.join()
