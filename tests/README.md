@@ -18,4 +18,8 @@ pip install -r tests/requirements.txt
 # Run the test suite
 pytest -vvv tests/
 ```
-The tests parallelization can throw spurious errors due to the bitcoind RPC proxy..
+You might also want to run tests in parallel, with:
+```
+pytest -vvv tests/ -n 4
+```
+In this case, think of adjusting the `TIMEOUT` env var if necessary.
