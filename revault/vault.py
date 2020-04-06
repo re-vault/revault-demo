@@ -384,6 +384,12 @@ class Vault:
                                 v["emergency_tx"].serialize().hex())
                         except bitcoin.rpc.VerifyAlreadyInChainError:
                             pass
+                        try:
+                            self.bitcoind.sendrawtransaction(
+                                v["unvault_emer_tx"].serialize().hex())
+                        except bitcoin.rpc.VerifyError:
+                            # Missing inputs
+                            pass
                         # FIXME: wait for it to be mined ?
                     # Game over.
                     self.stopped = True
