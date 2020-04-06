@@ -14,8 +14,8 @@ from bitcoin.wallet import CBitcoinAddress, CKey
 from decimal import Decimal, getcontext
 from fixtures import *  # noqa: F401,F403
 from revault.transactions import (
-    vault_txout, vault_script, unvault_txout, unvault_script,
-    create_unvault_tx, sign_unvault_tx, form_unvault_tx,
+    vault_txout, vault_script, unvault_txout, unvault_script, emergency_txout,
+    emergency_script, create_unvault_tx, sign_unvault_tx, form_unvault_tx,
     create_emergency_vault_tx, sign_emergency_vault_tx,
     form_emergency_vault_tx, create_cancel_tx, sign_cancel_tx, form_cancel_tx,
     create_emer_unvault_tx, sign_emer_unvault_tx, form_emer_unvault_tx,
@@ -144,6 +144,34 @@ def test_unvault_txout(bitcoind):
         bitcoind.generate_block(1)
     # It's been 6 blocks now
     bitcoind.send_tx(b2x(tx.serialize()))
+    assert bitcoind.has_utxo(addr)
+
+
+def test_emergency_txout(bitcoind):
+    """Test mostly the emergency tx locktime"""
+    amount = Decimal("50") - Decimal("500") / Decimal(COIN)
+    privkeys = [CKey(os.urandom(32)) for _ in range(4)]
+    pubkeys = [k.pub for k in privkeys]
+    txo = emergency_txout(pubkeys, COIN * amount)
+    addr = str(CBitcoinAddress.from_scriptPubKey(txo.scriptPubKey))
+    # This makes a transaction with only one vout
+    txid = bitcoind.pay_to(addr, amount)
+    new_amount = amount - Decimal("500") / Decimal(COIN)
+    addr = bitcoind.getnewaddress()
+    txin = CTxIn(COutPoint(lx(txid), 0), nSequence=4464)
+    txout = CTxOut(new_amount * COIN, CBitcoinAddress(addr).to_scriptPubKey())
+    tx = CMutableTransaction([txin], [txout], nVersion=2)
+    tx_hash = SignatureHash(emergency_script(pubkeys), tx, 0, SIGHASH_ALL,
+                            int(amount * COIN), SIGVERSION_WITNESS_V0)
+    sigs = [k.sign(tx_hash) + bytes([SIGHASH_ALL]) for k in privkeys]
+    witness_script = [bytes(0), *sigs, emergency_script(pubkeys)]
+    tx.wit = CTxWitness([CTxInWitness(CScriptWitness(witness_script))])
+    # 1 month of locktime
+    bitcoind.generate_block(4464 - 2)
+    with pytest.raises(VerifyRejectedError, match="non-BIP68-final"):
+        bitcoind.send_tx(tx.serialize().hex())
+    bitcoind.generate_block(1)
+    bitcoind.send_tx(tx.serialize().hex())
     assert bitcoind.has_utxo(addr)
 
 

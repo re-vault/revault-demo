@@ -6,9 +6,9 @@ from bitcoin.core import (
 )
 from bitcoin.core.script import (
     CScript, OP_CHECKSIG, OP_CHECKSIGVERIFY, OP_CHECKMULTISIG, OP_SWAP, OP_ADD,
-    OP_DUP, OP_EQUAL, OP_EQUALVERIFY, OP_CHECKSEQUENCEVERIFY, OP_IF, OP_ELSE,
-    OP_ENDIF, OP_0, OP_2, OP_3, OP_4, OP_6, SignatureHash, SIGHASH_ALL,
-    SIGVERSION_WITNESS_V0, CScriptWitness
+    OP_DUP, OP_EQUAL, OP_EQUALVERIFY, OP_CHECKSEQUENCEVERIFY, OP_DROP,
+    OP_IF, OP_ELSE, OP_ENDIF, OP_0, OP_2, OP_3, OP_4, OP_6, SignatureHash,
+    SIGHASH_ALL, SIGVERSION_WITNESS_V0, CScriptWitness
 )
 from bitcoin.wallet import CKey, CBitcoinAddress
 
@@ -63,17 +63,26 @@ def unvault_txout(pubkeys, pub_server, value):
     return CTxOut(value, p2wsh)
 
 
+def emergency_script(pubkeys):
+    # A locktime of a month
+    # >>> 31 * 24 * 6
+    return CScript([4464, OP_CHECKSEQUENCEVERIFY, OP_DROP, OP_4,
+                    *pubkeys, OP_4, OP_CHECKMULTISIG])
+
+
 def emergency_txout(pubkeys, value):
-    """The "deep vault".
+    """The "deep vault". Different pubkeys, and a big timelock.
 
     :param pubkeys: A list containing the offline pubkey of each of the
                     stakeholders, as bytes.
     :param value: The output value in satoshis.
 
-    :return: A CTxOut paying to a 4of4 of all stakeholers' offline pubkeys.
+    :return: A CTxOut paying to a 4of4 of all stakeholers' offline pubkeys
+             after approximatively a month.
     """
-    # We made it a different transaction just for terminology
-    return vault_txout(pubkeys, value)
+    script = emergency_script(pubkeys)
+    p2wsh = CScript([OP_0, hashlib.sha256(script).digest()])
+    return CTxOut(value, p2wsh)
 
 
 def create_spend_vault_txout(vault_txid, vault_vout, txout):
