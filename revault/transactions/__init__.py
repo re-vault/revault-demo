@@ -8,9 +8,14 @@ from bitcoin.core.script import (
     CScript, OP_CHECKSIG, OP_CHECKSIGVERIFY, OP_CHECKMULTISIG, OP_SWAP, OP_ADD,
     OP_DUP, OP_EQUAL, OP_EQUALVERIFY, OP_CHECKSEQUENCEVERIFY, OP_DROP,
     OP_IF, OP_ELSE, OP_ENDIF, OP_0, OP_2, OP_3, OP_4, OP_6, SignatureHash,
-    SIGHASH_ALL, SIGVERSION_WITNESS_V0, CScriptWitness
+    SIGHASH_ALL, SIGHASH_SINGLE, SIGHASH_ANYONECANPAY, SIGVERSION_WITNESS_V0,
+    CScriptWitness
 )
 from bitcoin.wallet import CKey, CBitcoinAddress
+
+
+# The SIGHASH used for the signature given to other stakeholders.
+SINGLE_ANYONECANPAY = SIGHASH_SINGLE | SIGHASH_ANYONECANPAY
 
 
 def vault_script(pubkeys):
@@ -100,25 +105,6 @@ def create_spend_vault_txout(vault_txid, vault_vout, txout):
     return CMutableTransaction([tmp_txin], [txout], nVersion=2)
 
 
-def sign_spend_vault_txout(tx, pubkeys, prev_value, privkeys):
-    """Signs a transaction spending a vault txout it with the given private keys.
-
-    :param tx: The CMutableTransaction to sign.
-    :param pubkeys: A list of each stakeholder's pubkey.
-    :param prev_value: The value of the vault txout we spend.
-    :param privkeys: A list of the private keys of the four stakeholders to
-                     sign the transaction.
-
-    :return: The signatures in the same order as the private keys.
-    """
-    tx_hash = SignatureHash(vault_script(pubkeys), tx, 0,
-                            SIGHASH_ALL, amount=prev_value,
-                            sigversion=SIGVERSION_WITNESS_V0)
-    # A signature per pubkey
-    sigs = [CKey(key).sign(tx_hash) + bytes([SIGHASH_ALL]) for key in privkeys]
-    return sigs
-
-
 def form_spend_vault_txout(tx, pubkeys, sigs):
     """Forms the final transaction spending a vault txout.
 
@@ -158,6 +144,9 @@ def create_unvault_tx(vault_txid, vault_vout, pubkeys, pub_server, value):
 def sign_unvault_tx(tx, pubkeys, prev_value, privkeys):
     """Signs the unvaulting transaction.
 
+    As it's not a revaulting transaction it's signed with SIGHASH_ALL.
+    We can imagine updating this transaction as the fees evolve, though.
+
     :param vault_txid: The id of the transaction funding the vault.
     :param pubkeys: A list containing the public key of each stakeholder.
     :param prev_value: The vault output (previout output) value in satoshis.
@@ -165,7 +154,12 @@ def sign_unvault_tx(tx, pubkeys, prev_value, privkeys):
 
     :return: The signatures in the same order as the given privkeys.
     """
-    return sign_spend_vault_txout(tx, pubkeys, prev_value, privkeys)
+    tx_hash = SignatureHash(vault_script(pubkeys), tx, 0,
+                            SIGHASH_ALL, amount=prev_value,
+                            sigversion=SIGVERSION_WITNESS_V0)
+    # A signature per pubkey
+    sigs = [CKey(key).sign(tx_hash) + bytes([SIGHASH_ALL]) for key in privkeys]
+    return sigs
 
 
 def form_unvault_tx(tx, pubkeys, sigs):
@@ -199,15 +193,26 @@ def create_emergency_vault_tx(vault_txid, vault_vout, value, emer_pubkeys):
 def sign_emergency_vault_tx(tx, pubkeys, prev_value, privkeys):
     """Signs the transaction which moves a vault's coins to the offline 4of4.
 
+    This transaction is crucial to preserve our security assumptions (i.e. a
+    revaulting transaction will be confirmed), so stakeholders exchange
+    SINGLE | ANYONECANPAY signatures to allow any of them to increase
+    the feerate by appending an input and an output.
+
     :param vault_txid: The id of the transaction funding the vault, as bytes.
     :param pubkeys: A list containing the public key of each stakeholder.
     :param prev_value: The vault output (previout output) value in satoshis.
     :param privkeys: A list of the private keys of the four stakeholders to
                      sign the transaction.
 
-    :return: A tuple, the *unsigned* emergency transaction and the signatures.
+    :return: A list, one signature per given privkey.
     """
-    return sign_spend_vault_txout(tx, pubkeys, prev_value, privkeys)
+    tx_hash = SignatureHash(vault_script(pubkeys), tx, 0,
+                            SINGLE_ANYONECANPAY, amount=prev_value,
+                            sigversion=SIGVERSION_WITNESS_V0)
+    # A signature per pubkey
+    sigs = [CKey(key).sign(tx_hash) + bytes([SINGLE_ANYONECANPAY])
+            for key in privkeys]
+    return sigs
 
 
 def form_emergency_vault_tx(tx, pubkeys, sigs):
@@ -236,12 +241,16 @@ def create_unvault_spend(unvault_txid, unvault_vout, txout):
     return CMutableTransaction([txin], [txout], nVersion=2)
 
 
-def sign_unvault_spend(tx, privkeys, pubkeys, pub_server, prev_value):
-    """Signs a transaction spending from an unvault transaction.
+def sign_unvault_revault(tx, privkeys, pubkeys, pub_server, prev_value):
+    """Signs a transaction revaulting an unvault transaction.
 
     This is the "all stakeholders sign" path of the script, not encumbered by a
     timelock.
     This path is used for both the emergency and cancel transactions.
+    These transactions are crucial to preserve our security assumptions (i.e. a
+    revaulting transaction will be confirmed), so stakeholders exchange
+    SINGLE | ANYONECANPAY signatures to allow any of them to increase
+    the feerate by appending an input and an output.
 
     :param tx: The unsigned transaction, a CMutableTransaction.
     :param privkeys: The private keys to sign the transaction with (a list).
@@ -252,14 +261,14 @@ def sign_unvault_spend(tx, privkeys, pubkeys, pub_server, prev_value):
     :return: The signatures for the provided privkeys (a list).
     """
     tx_hash = SignatureHash(unvault_script(*pubkeys, pub_server), tx,
-                            0, SIGHASH_ALL, prev_value,
+                            0, SINGLE_ANYONECANPAY, prev_value,
                             SIGVERSION_WITNESS_V0)
-    return [CKey(key).sign(tx_hash) + bytes([SIGHASH_ALL])
+    return [CKey(key).sign(tx_hash) + bytes([SINGLE_ANYONECANPAY])
             for key in privkeys]
 
 
 def form_unvault_spend(tx, sigs, pubkeys, pub_server):
-    """Forms the transaction spending from an unvault using fours signatures.
+    """Forms the transaction spending from an unvault using four signatures.
 
     :param tx: The unsigned transaction, a CMutableTransaction.
     :param sigs: The list of the four signatures in the same order as the
@@ -295,7 +304,8 @@ def create_cancel_tx(unvault_txid, unvault_vout, pubkeys, value):
 
 
 def sign_cancel_tx(tx, privkeys, pubkeys, pub_server, prev_value):
-    """Signs the cancel transaction with the given privkeys.
+    """Signs the cancel transaction with the given privkeys using SINGLE |
+    ANYONECANPAY.
 
     :param tx: The unsigned transaction, a CMutableTransaction.
     :param privkeys: The private keys to sign the transaction with (a list).
@@ -305,7 +315,7 @@ def sign_cancel_tx(tx, privkeys, pubkeys, pub_server, prev_value):
 
     :return: The signatures for the provided privkeys (a list).
     """
-    return sign_unvault_spend(tx, privkeys, pubkeys, pub_server, prev_value)
+    return sign_unvault_revault(tx, privkeys, pubkeys, pub_server, prev_value)
 
 
 def form_cancel_tx(tx, sigs, pubkeys, pub_server):
@@ -339,7 +349,8 @@ def create_emer_unvault_tx(unvault_txid, unvault_vout, emer_pubkeys, value):
 
 
 def sign_emer_unvault_tx(tx, privkeys, pubkeys, pub_server, prev_value):
-    """Sign the transaction which reverts a spend_tx to the offline 4of4.
+    """Sign the transaction which reverts a spend_tx to the offline 4of4 using
+    SINGLE | ANYONECANPAY.
 
     :param tx: The unsigned transaction, a CMutableTransaction.
     :param privkeys: A list of the private keys to sign the transaction with.
@@ -349,7 +360,7 @@ def sign_emer_unvault_tx(tx, privkeys, pubkeys, pub_server, prev_value):
 
     :return: A list of the signature for each provided private key.
     """
-    return sign_unvault_spend(tx, privkeys, pubkeys, pub_server, prev_value)
+    return sign_unvault_revault(tx, privkeys, pubkeys, pub_server, prev_value)
 
 
 def form_emer_unvault_tx(tx, sigs, pubkeys, pub_server):

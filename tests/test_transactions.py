@@ -4,11 +4,12 @@ import pytest
 
 from bitcoin.core import (
     CTxIn, CTxOut, COutPoint, CTxInWitness, CMutableTransaction, CTxWitness,
-    b2x, lx, COIN
+    b2x, lx, COIN, CScript, Hash160, b2lx,
 )
 from bitcoin.rpc import VerifyRejectedError
 from bitcoin.core.script import (
-    CScriptWitness, SIGHASH_ALL, SIGVERSION_WITNESS_V0, SignatureHash
+    CScriptWitness, SIGHASH_ALL, SIGHASH_SINGLE, SIGHASH_ANYONECANPAY,
+    SIGVERSION_WITNESS_V0, SignatureHash, OP_0,
 )
 from bitcoin.wallet import CBitcoinAddress, CKey
 from decimal import Decimal, getcontext
@@ -25,6 +26,7 @@ from revault.utils import empty_signature
 
 
 bitcoin.SelectParams("regtest")
+# FIXME !
 getcontext().prec = 8
 
 
@@ -235,6 +237,7 @@ def send_unvault_tx(bitcoind, stk_privkeys, stk_pubkeys, serv_pubkey,
     vault_txid = lx(send_vault_tx(bitcoind, stk_pubkeys, amount_vault))
     unvtx = create_unvault_tx(vault_txid, 0, stk_pubkeys, serv_pubkey,
                               amount_unvault)
+    assert len(unvtx.vout) == 1 and len(unvtx.vin) == 1
     sigs = sign_unvault_tx(unvtx, stk_pubkeys, amount_vault, stk_privkeys)
     unvtx = form_unvault_tx(unvtx, stk_pubkeys, sigs)
     bitcoind.send_tx(b2x(unvtx.serialize()))
@@ -402,3 +405,112 @@ def test_spend_unvault_tx_trader_A(bitcoind):
         bitcoind.generate_block(1)
     bitcoind.send_tx(b2x(CTx.serialize()))
     assert bitcoind.has_utxo(addr)
+
+
+def add_input_output(bitcoind, tx):
+    """Add an input and an output to a CMutableTransaction, SIGHASH_ALL."""
+    # First we get some coins
+    privkey = CKey(os.urandom(32))
+    scriptPubKey = CScript([OP_0, Hash160(privkey.pub)])
+    address = CBitcoinAddress.from_scriptPubKey(scriptPubKey)
+    amount = Decimal("50") * Decimal(COIN) - Decimal("500")
+    # This creates a one-output transaction
+    txid = bitcoind.pay_to(str(address), amount / Decimal(COIN))
+    # We bump the fees by 5000
+    tx.vout.append(CTxOut(amount - Decimal("5000"), scriptPubKey))
+    tx.vin.append(CTxIn(COutPoint(lx(txid), 0)))
+    # Sign the new output with ALL
+    tx_hash = SignatureHash(address.to_redeemScript(), tx, 1, SIGHASH_ALL,
+                            int(amount), SIGVERSION_WITNESS_V0)
+    sig = privkey.sign(tx_hash) + bytes([SIGHASH_ALL])
+    tx.wit.vtxinwit.append(CTxInWitness(CScriptWitness([sig, privkey.pub])))
+
+
+def tx_fees(bitcoind, tx):
+    """Computes the transaction fees of a CTransaction"""
+    value_in = sum(
+        bitcoind.rpc.getrawtransaction(
+            b2lx(txin.prevout.hash), True)["vout"][txin.prevout.n]["value"]
+        for txin in tx.vin
+    )
+    value_out = sum(o.nValue for o in tx.vout)
+
+    # bitcoind API in btc...
+    return value_in * Decimal(COIN) - value_out
+
+
+def test_increase_revault_tx_feerate(bitcoind):
+    """This tests that any of the stakeholders can increase the feerate of any
+    of the revaulting transactions in a timely manner. Will justice rule?"""
+    # The stakeholders, the first two are the traders.
+    stk_privkeys = [os.urandom(32) for i in range(4)]
+    stk_pubkeys = [CKey(k).pub for k in stk_privkeys]
+    # Same, but for the EDV
+    emer_privkeys = [os.urandom(32) for i in range(4)]
+    emer_pubkeys = [CKey(k).pub for k in emer_privkeys]
+    # The co-signing server, required by the spend tx
+    serv_privkey = os.urandom(32)
+    serv_pubkey = CKey(serv_privkey).pub
+
+    # Test the vault emergency
+    amount_vault = 50 * COIN - 500
+    txid = send_vault_tx(bitcoind, stk_pubkeys, amount_vault)
+    amount_emer = amount_vault - 500
+    CTx = create_emergency_vault_tx(lx(txid), 0, amount_emer, emer_pubkeys)
+    sigs = [sign_emergency_vault_tx(CTx, stk_pubkeys, amount_vault, [p])[0]
+            for p in stk_privkeys]
+    # Sanity checks don't hurt
+    assert all(sig[-1] == SIGHASH_SINGLE | SIGHASH_ANYONECANPAY
+               for sig in sigs)
+    CMTx = CMutableTransaction.from_tx(
+        form_emergency_vault_tx(CTx, stk_pubkeys, sigs)
+    )
+    fees_before = tx_fees(bitcoind, CMTx)
+    add_input_output(bitcoind, CMTx)
+    fees_after = tx_fees(bitcoind, CMTx)
+    assert fees_after > fees_before
+    bitcoind.send_tx(CMTx.serialize().hex())
+
+    # Test the emer unvault
+    amount_vault = 50 * COIN - 500
+    amount_unvault = amount_vault - 500
+    txid = send_unvault_tx(bitcoind, stk_privkeys, stk_pubkeys, serv_pubkey,
+                           amount_vault, amount_unvault)
+    amount_emer = amount_unvault - 500
+    CTx = create_emer_unvault_tx(txid, 0, emer_pubkeys, amount_emer)
+    sigs = [sign_emer_unvault_tx(CTx, [p], stk_pubkeys, serv_pubkey,
+                                 amount_unvault)[0]
+            for p in stk_privkeys]
+    # Sanity checks don't hurt
+    assert all(sig[-1] == SIGHASH_SINGLE | SIGHASH_ANYONECANPAY
+               for sig in sigs)
+    CMTx = CMutableTransaction.from_tx(
+        form_emer_unvault_tx(CTx, sigs, stk_pubkeys, serv_pubkey)
+    )
+    fees_before = tx_fees(bitcoind, CMTx)
+    add_input_output(bitcoind, CMTx)
+    fees_after = tx_fees(bitcoind, CMTx)
+    assert fees_after > fees_before
+    bitcoind.send_tx(CMTx.serialize().hex())
+
+    # Test the cancel unvault
+    amount_vault = 50 * COIN - 500
+    amount_unvault = amount_vault - 500
+    txid = send_unvault_tx(bitcoind, stk_privkeys, stk_pubkeys, serv_pubkey,
+                           amount_vault, amount_unvault)
+    amount_cancel = amount_unvault - 500
+    CTx = create_cancel_tx(txid, 0, emer_pubkeys, amount_cancel)
+    sigs = [sign_cancel_tx(CTx, [p], stk_pubkeys, serv_pubkey,
+                           amount_unvault)[0]
+            for p in stk_privkeys]
+    # Sanity checks don't hurt
+    assert all(sig[-1] == SIGHASH_SINGLE | SIGHASH_ANYONECANPAY
+               for sig in sigs)
+    CMTx = CMutableTransaction.from_tx(
+        form_cancel_tx(CTx, sigs, stk_pubkeys, serv_pubkey)
+    )
+    fees_before = tx_fees(bitcoind, CMTx)
+    add_input_output(bitcoind, CMTx)
+    fees_after = tx_fees(bitcoind, CMTx)
+    assert fees_after > fees_before
+    bitcoind.send_tx(CMTx.serialize().hex())
