@@ -351,16 +351,6 @@ class Vault:
                                       unvault_emer_sig)
         self.vaults.append(vault)
 
-    def remove_vault(self, utxo):
-        """A vault was spent, remove it from our view.
-
-        :param utxo: The utxo spending the vault (an entry of listunspent).
-        """
-        tx = self.bitcoind.gettransaction(utxo["txid"])["hex"]
-        prev = self.bitcoind.decoderawtransaction(tx)["vin"][0]
-        self.vaults = [v for v in self.vaults
-                       if v["txid"] != prev["txid"]]
-
     def poll_for_funds(self):
         """Polls bitcoind to check for received funds.
 
@@ -405,8 +395,8 @@ class Vault:
                                 # Missing inputs
                                 pass
                             # FIXME: wait for it to be mined ?
-                        self.stopped = True
-                        return
+                    self.stopped = True
+                    return
 
                 # If not, it must be an unvault broadcast !
                 unvault_addr = CBitcoinAddress.from_scriptPubKey(
