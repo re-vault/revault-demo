@@ -190,7 +190,8 @@ def create_emergency_vault_tx(vault_txid, vault_vout, value, emer_pubkeys):
     return create_spend_vault_txout(vault_txid, vault_vout, txout)
 
 
-def sign_emergency_vault_tx(tx, pubkeys, prev_value, privkeys):
+def sign_emergency_vault_tx(tx, pubkeys, prev_value, privkeys,
+                            sign_all=False):
     """Signs the transaction which moves a vault's coins to the offline 4of4.
 
     This transaction is crucial to preserve our security assumptions (i.e. a
@@ -203,14 +204,16 @@ def sign_emergency_vault_tx(tx, pubkeys, prev_value, privkeys):
     :param prev_value: The vault output (previout output) value in satoshis.
     :param privkeys: A list of the private keys of the four stakeholders to
                      sign the transaction.
+    :param sign_all: If set to True, sign we SIGHASH_ALL instead.
 
     :return: A list, one signature per given privkey.
     """
+    sighash = SIGHASH_ALL if sign_all else SINGLE_ANYONECANPAY
     tx_hash = SignatureHash(vault_script(pubkeys), tx, 0,
-                            SINGLE_ANYONECANPAY, amount=prev_value,
+                            sighash, amount=prev_value,
                             sigversion=SIGVERSION_WITNESS_V0)
     # A signature per pubkey
-    sigs = [CKey(key).sign(tx_hash) + bytes([SINGLE_ANYONECANPAY])
+    sigs = [CKey(key).sign(tx_hash) + bytes([sighash])
             for key in privkeys]
     return sigs
 
@@ -241,7 +244,8 @@ def create_unvault_spend(unvault_txid, unvault_vout, txout):
     return CMutableTransaction([txin], [txout], nVersion=2)
 
 
-def sign_unvault_revault(tx, privkeys, pubkeys, pub_server, prev_value):
+def sign_unvault_revault(tx, privkeys, pubkeys, pub_server, prev_value,
+                         sign_all=False):
     """Signs a transaction revaulting an unvault transaction.
 
     This is the "all stakeholders sign" path of the script, not encumbered by a
@@ -257,13 +261,14 @@ def sign_unvault_revault(tx, privkeys, pubkeys, pub_server, prev_value):
     :param pubkeys: The pubkeys of the stakeholders.
     :param pub_server: The pubkey of the cosigning server.
     :param prev_value: The prevout's value in satoshis.
+    :param sign_all: If set to True, sign we SIGHASH_ALL instead.
 
     :return: The signatures for the provided privkeys (a list).
     """
+    sighash = SIGHASH_ALL if sign_all else SINGLE_ANYONECANPAY
     tx_hash = SignatureHash(unvault_script(*pubkeys, pub_server), tx,
-                            0, SINGLE_ANYONECANPAY, prev_value,
-                            SIGVERSION_WITNESS_V0)
-    return [CKey(key).sign(tx_hash) + bytes([SINGLE_ANYONECANPAY])
+                            0, sighash, prev_value, SIGVERSION_WITNESS_V0)
+    return [CKey(key).sign(tx_hash) + bytes([sighash])
             for key in privkeys]
 
 
@@ -303,7 +308,8 @@ def create_cancel_tx(unvault_txid, unvault_vout, pubkeys, value):
     return create_unvault_spend(unvault_txid, unvault_vout, txout)
 
 
-def sign_cancel_tx(tx, privkeys, pubkeys, pub_server, prev_value):
+def sign_cancel_tx(tx, privkeys, pubkeys, pub_server, prev_value,
+                   sign_all=False):
     """Signs the cancel transaction with the given privkeys using SINGLE |
     ANYONECANPAY.
 
@@ -312,10 +318,12 @@ def sign_cancel_tx(tx, privkeys, pubkeys, pub_server, prev_value):
     :param pubkeys: The pubkeys of the stakeholders.
     :param pub_server: The pubkey of the cosigning server.
     :param prev_value: The prevout's value in satoshis.
+    :param sign_all: If set to True, sign we SIGHASH_ALL instead.
 
     :return: The signatures for the provided privkeys (a list).
     """
-    return sign_unvault_revault(tx, privkeys, pubkeys, pub_server, prev_value)
+    return sign_unvault_revault(tx, privkeys, pubkeys, pub_server, prev_value,
+                                sign_all)
 
 
 def form_cancel_tx(tx, sigs, pubkeys, pub_server):
@@ -348,7 +356,8 @@ def create_emer_unvault_tx(unvault_txid, unvault_vout, emer_pubkeys, value):
     return create_unvault_spend(unvault_txid, unvault_vout, txout)
 
 
-def sign_emer_unvault_tx(tx, privkeys, pubkeys, pub_server, prev_value):
+def sign_emer_unvault_tx(tx, privkeys, pubkeys, pub_server, prev_value,
+                         sign_all=False):
     """Sign the transaction which reverts a spend_tx to the offline 4of4 using
     SINGLE | ANYONECANPAY.
 
@@ -357,10 +366,12 @@ def sign_emer_unvault_tx(tx, privkeys, pubkeys, pub_server, prev_value):
     :param pubkeys: A list of all the stakeholders' vault public keys.
     :param pub_server: The public key of the cosigning server.
     :param prev_value: The prevout's value in satoshis.
+    :param sign_all: If set to True, sign we SIGHASH_ALL instead.
 
     :return: A list of the signature for each provided private key.
     """
-    return sign_unvault_revault(tx, privkeys, pubkeys, pub_server, prev_value)
+    return sign_unvault_revault(tx, privkeys, pubkeys, pub_server, prev_value,
+                                sign_all)
 
 
 def form_emer_unvault_tx(tx, sigs, pubkeys, pub_server):
