@@ -26,6 +26,10 @@ class Vault:
     deterministically derive each vault.
     Builds and signs all the necessary transactions when spending from the
     vault.
+
+    Note that this demo doesn't comport some components of the whole
+    architecture, for example there is no interaction with a watchtower
+    (including the update of transactions and signatures as feerate moves).
     """
     def __init__(self, xpriv, xpubs, emergency_pubkeys, bitcoin_conf_path,
                  cosigning_url, sigserver_url, acked_addresses,
@@ -230,6 +234,12 @@ class Vault:
         vault["emergency_tx"] = \
             create_emergency_vault_tx(lx(vault["txid"]), vault["vout"],
                                       amount, self.emergency_pubkeys)
+        # Sign the one we keep with ALL..
+        sig = sign_emergency_vault_tx(vault["emergency_tx"], vault["pubkeys"],
+                                      vault["amount"], [vault["privkey"]],
+                                      sign_all=True)[0]
+        vault["emergency_sigs"][self.keychains.index(None)] = sig
+        # .. And the one we share with SINGLE | ANYONECANPAY
         return sign_emergency_vault_tx(vault["emergency_tx"], vault["pubkeys"],
                                        vault["amount"], [vault["privkey"]])[0]
 
@@ -267,6 +277,12 @@ class Vault:
         vault["cancel_tx"] = create_cancel_tx(unvault_txid, 0,
                                               vault["pubkeys"], cancel_amount)
         # It wants the pubkeys for the prevout script, but they are the same!
+        sig = sign_cancel_tx(vault["cancel_tx"], [vault["privkey"]],
+                             vault["pubkeys"], self.cosigner_pubkey,
+                             unvault_amount, sign_all=True)[0]
+        vault["cancel_sigs"][self.keychains.index(None)] = sig
+
+        # Sign the one we share with SINGLE | ANYONECANPAY
         return sign_cancel_tx(vault["cancel_tx"], [vault["privkey"]],
                               vault["pubkeys"], self.cosigner_pubkey,
                               unvault_amount)[0]
@@ -286,9 +302,63 @@ class Vault:
         vault["unvault_emer_tx"] = \
             create_emer_unvault_tx(unvault_txid, 0, self.emergency_pubkeys,
                                    emer_amount)
+        # Sign the one we keep with ALL..
+        sig = sign_emer_unvault_tx(vault["unvault_emer_tx"],
+                                   [vault["privkey"]], vault["pubkeys"],
+                                   self.cosigner_pubkey, unvault_amount)[0]
+        vault["unvault_emer_sigs"][self.keychains.index(None)] = sig
+        # .. And the one we share with SINGLE | ANYONECANPAY
         return sign_emer_unvault_tx(vault["unvault_emer_tx"],
                                     [vault["privkey"]], vault["pubkeys"],
                                     self.cosigner_pubkey, unvault_amount)[0]
+
+    def get_signed_emergency_tx(self, vault):
+        """Form and return the emergency transaction for this vault.
+
+        This is where we can bump the fees and re-sign it if necessary.
+
+        :return: The signed emergency transaction, or None if we did not
+                 gathered all the signatures for it.
+        """
+        if None in vault["emergency_sigs"]:
+            return None
+
+        # TODO: Fee bumping
+        return form_emergency_vault_tx(vault["emergency_tx"],
+                                       vault["pubkeys"],
+                                       vault["emergency_sigs"])
+
+    def get_signed_cancel_tx(self, vault):
+        """Form and return the cancel transaction for this vault's unvault.
+
+        This is where we can bump the fees and re-sign it if necessary.
+
+        :return: The signed transaction, or None if we did not gathered all
+                 the signatures for it yet.
+        """
+        if None in vault["cancel_sigs"]:
+            return None
+
+        # TODO: Fee bumping
+        return form_cancel_tx(vault["cancel_tx"], vault["cancel_sigs"],
+                              vault["pubkeys"], self.cosigner_pubkey)
+
+    def get_signed_unvault_emergency_tx(self, vault):
+        """Form and return the emergency transaction for this vault's unvault.
+
+        This is where we can bump the fees and re-sign it if necessary.
+
+        :return: The signed transaction, or None if we did not gathered all
+                 the signatures for it yet.
+        """
+        if None in vault["unvault_emer_sigs"]:
+            return None
+
+        # TODO: Fee bumping
+        return form_emer_unvault_tx(vault["unvault_emer_tx"],
+                                    vault["unvault_emer_sigs"],
+                                    vault["pubkeys"],
+                                    self.cosigner_pubkey)
 
     def add_new_vault(self, output):
         """Add a new vault output to our list.
@@ -305,7 +375,7 @@ class Vault:
             # For convenience
             "privkey": None,
             "address": output["address"],
-            # The first emergency transaction
+            # The *unsigned* first emergency transaction
             "emergency_tx": None,
             # We store the signatures for each transactions as otherwise we
             # would ask all of them to the sig server each time the polling
@@ -317,11 +387,10 @@ class Vault:
             "unvault_tx": None,
             "unvault_sigs": [None, None, None, None],
             "unvault_signed": False,
-            # The cancel, which reverts an unvault
+            # The *unsigned* cancel tx
             "cancel_tx": None,
             "cancel_sigs": [None, None, None, None],
-            # Something went bad, but we are in the middle of an unvault,
-            # broadcast this.
+            # The *unsigned* second emergency transaction
             "unvault_emer_tx": None,
             "unvault_emer_sigs": [None, None, None, None],
             # Are cancel and emer signed ? If so we can commit to the unvault.
@@ -333,7 +402,7 @@ class Vault:
         vault["pubkeys"] = self.get_pubkeys(index)
         vault["privkey"] = self.our_bip32.get_privkey_from_path([index])
 
-        emer_sig = self.create_sign_emergency(vault)
+        shared_emer_sig = self.create_sign_emergency(vault)
         # Keep it for later
         vault["unvault_sigs"][self.keychains.index(None)] = \
             self.create_sign_unvault(vault)
@@ -344,7 +413,7 @@ class Vault:
         unvault_emer_sig = self.create_sign_unvault_emer(vault)
         # Send all our sigs but the unvault one, until we are secured
         self.sigserver.send_signature(vault["emergency_tx"].GetTxid().hex(),
-                                      emer_sig)
+                                      shared_emer_sig)
         self.sigserver.send_signature(vault["cancel_tx"].GetTxid().hex(),
                                       cancel_sig)
         self.sigserver.send_signature(vault["unvault_emer_tx"].GetTxid().hex(),
@@ -361,7 +430,7 @@ class Vault:
         Note that this main loop used to be somewhat less naïvely implemented,
         but it was both a premature and useless optimisation.
         """
-        while not self.funds_poller_stop.wait(5.0):
+        while not self.funds_poller_stop.wait(2.0):
             # What we think we have
             known_outputs = [v["txid"] for v in self.vaults]
             # What bitcoind tells we *actually* have
@@ -382,19 +451,21 @@ class Vault:
                 ):
                     # Game over.
                     for v in self.vaults:
-                        if v["emergency_signed"]:
+                        tx = self.get_signed_emergency_tx(v).serialize().hex()
+                        if tx is not None:
                             try:
-                                self.bitcoind.sendrawtransaction(
-                                    v["emergency_tx"].serialize().hex())
-                            except bitcoin.rpc.VerifyAlreadyInChainError:
+                                self.bitcoind.sendrawtransaction(tx)
+                            except bitcoin.rpc.JSONRPCError:
+                                # Already sent!
                                 pass
+                        unvtx = self.get_signed_unvault_emergency_tx(v)
+                        hextx = unvtx.serialize().hex()
+                        if tx is not None:
                             try:
-                                self.bitcoind.sendrawtransaction(
-                                    v["unvault_emer_tx"].serialize().hex())
-                            except bitcoin.rpc.VerifyError:
-                                # Missing inputs
+                                self.bitcoind.sendrawtransaction(hextx)
+                            except bitcoin.rpc.JSONRPCError:
+                                # Already sent!
                                 pass
-                            # FIXME: wait for it to be mined ?
                     self.stopped = True
                     return
 
@@ -406,7 +477,6 @@ class Vault:
                     minconf=0,
                     addresses=[str(unvault_addr)]
                 )
-                print(unvault_utxos)
                 if len(unvault_utxos) == 0:
                     # Maybe someone has already broadcast the cancel
                     # transaction
@@ -420,10 +490,11 @@ class Vault:
                 else:
                     if v["txid"] not in self.acked_spends:
                         try:
-                            self.bitcoind.sendrawtransaction(
-                                v["cancel_tx"].serialize().hex()
-                            )
-                        except bitcoin.rpc.VerifyAlreadyInChainError:
+                            tx = self.get_signed_cancel_tx(v).serialize().hex()
+                            if tx is not None:
+                                self.bitcoind.sendrawtransaction(tx)
+                        except bitcoin.rpc.JSONRPCError:
+                            # Already sent!
                             pass
                         # FIXME wait for it to be mined ?
 
@@ -607,16 +678,16 @@ class Vault:
                         self.sigserver.get_signature(txid, i)
                     self.vaults_lock.release()
 
+        # We got all the other signatures, if we append our (SIGHASH_ALL), the
+        # transaction MUST be valid.
+        emergency_tx = form_emergency_vault_tx(vault["emergency_tx"],
+                                               vault["pubkeys"],
+                                               vault["emergency_sigs"])
+        self.bitcoind.assertmempoolaccept([emergency_tx.serialize().hex()])
+
         self.vaults_lock.acquire()
-        vault["emergency_tx"] = \
-            form_emergency_vault_tx(vault["emergency_tx"],
-                                    vault["pubkeys"],
-                                    vault["emergency_sigs"])
         vault["emergency_signed"] = True
         self.vaults_lock.release()
-        self.bitcoind.assertmempoolaccept([
-            vault["emergency_tx"].serialize().hex()
-        ])
 
     def update_unvault_emergency(self, vault):
         """Poll the signature server for the unvault_emergency tx signature"""
@@ -632,14 +703,6 @@ class Vault:
                         self.sigserver.get_signature(txid, i)
                     self.vaults_lock.release()
 
-        self.vaults_lock.acquire()
-        vault["unvault_emer_tx"] = \
-            form_emer_unvault_tx(vault["unvault_emer_tx"],
-                                 vault["unvault_emer_sigs"],
-                                 vault["pubkeys"],
-                                 self.cosigner_pubkey)
-        self.vaults_lock.release()
-
     def update_cancel_unvault(self, vault):
         """Poll the signature server for the cancel_unvault tx signature"""
         txid = vault["cancel_tx"].GetTxid().hex()
@@ -653,13 +716,6 @@ class Vault:
                     vault["cancel_sigs"][i - 1] = \
                         self.sigserver.get_signature(txid, i)
                     self.vaults_lock.release()
-
-        self.vaults_lock.acquire()
-        vault["cancel_tx"] = form_cancel_tx(vault["cancel_tx"],
-                                            vault["cancel_sigs"],
-                                            vault["pubkeys"],
-                                            self.cosigner_pubkey)
-        self.vaults_lock.release()
 
     def update_unvault_transaction(self, vault):
         """Get others' sig for the unvault transaction"""

@@ -4,6 +4,7 @@ import random
 
 from bip32 import BIP32
 from bitcoin.core import b2x, COIN
+from bitcoin.core.script import SIGHASH_ALL
 from bitcoin.wallet import CKey
 from fixtures import *  # noqa: F401,F403
 from utils import wait_for
@@ -105,12 +106,14 @@ def test_emergency_tx_sync(vault_factory):
     for wallet in wallets:
         wait_for(lambda: all(vault["emergency_signed"]
                              for vault in wallet.vaults))
-    # All nodes should have the same emergency transactions
+    # All nodes should have the same unsigned emergency transactions
     for i in range(len(wallets) - 1):
-        first_emer_txs = [v["emergency_tx"] for v in wallets[i].vaults]
-        second_emer_txs = [v["emergency_tx"] for v in wallets[i + 1].vaults]
-        for tx in first_emer_txs:
-            assert tx == second_emer_txs[first_emer_txs.index(tx)]
+        first_emer_txids = [v["emergency_tx"].GetTxid()
+                            for v in wallets[i].vaults]
+        second_emer_txids = [v["emergency_tx"].GetTxid()
+                             for v in wallets[i + 1].vaults]
+        assert all(txid == second_emer_txids[first_emer_txids.index(txid)]
+                   for txid in first_emer_txids)
 
 
 def test_emergency_broadcast(vault_factory):
@@ -126,7 +129,13 @@ def test_emergency_broadcast(vault_factory):
         wait_for(lambda: all(v["emergency_signed"] for v in wallet.vaults))
     wallet = random.choice(wallets)
     vault = random.choice(wallet.vaults)
-    bitcoind.broadcast_and_mine(vault["emergency_tx"].serialize().hex())
+    emergency_tx = wallet.get_signed_emergency_tx(vault)
+    # The emergency tx must have been signed with ALL at least once !
+    assert any(element[-1] == SIGHASH_ALL
+               for element in emergency_tx.wit.vtxinwit[0].scriptWitness
+               # If this is a signature
+               if len(element) in {70, 71, 72})
+    bitcoind.broadcast_and_mine(emergency_tx.serialize().hex())
     wait_for(lambda: wallet.stopped)
 
 
@@ -233,11 +242,12 @@ def test_cancel_unvault(vault_factory):
     wait_for(lambda: all(v["unvault_signed"] for v in wallet.vaults))
     assert all(v["unvault_secure"] for v in wallet.vaults)
 
-    # Send some emergency transactions, this time no new vault created !
+    # Send an emergency transaction, this time no new vault created !
     bitcoind.broadcast_and_mine(b2x(wallet.vaults[1]["unvault_tx"]
                                     .serialize()))
-    bitcoind.broadcast_and_mine(b2x(wallet.vaults[1]["unvault_emer_tx"]
-                                    .serialize()))
+    unvault_emer = wallet.get_signed_unvault_emergency_tx(wallet.vaults[1])
+    assert unvault_emer is not None
+    bitcoind.broadcast_and_mine(unvault_emer.serialize().hex())
     # The wallets will broadcast all their emergency transactions
     wait_for(lambda: all(w.stopped for w in wallets))
 
