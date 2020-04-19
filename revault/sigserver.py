@@ -31,6 +31,8 @@ class SigServer:
         self.spend_acceptance = {}
         # A dictionary to store each spend destinations by txid.
         self.spend_requests = {}
+        # Used to test fee bumping
+        self.mocked_feerate = None
         self.setup_routes()
 
     def setup_routes(self):
@@ -64,7 +66,10 @@ class SigServer:
                 raise Exception("Unsupported tx type for get_feerate.")
 
             if txid not in self.feerates.keys():
-                if tx_type == "emergency":
+                print(self.mocked_feerate)
+                if self.mocked_feerate is not None:
+                    feerate = self.mocked_feerate
+                elif tx_type == "emergency":
                     # We use 10* the conservative estimation at 2 block for
                     # such a crucial transaction
                     feerate = self.estimatefee_hack(2, "CONSERVATIVE")
@@ -130,13 +135,24 @@ class SigServer:
         def spendrequests():
             return jsonify(self.spend_requests)
 
+    def mock_feerate(self, feerate):
+        """Return this feerate instead of asking bitcoind, used to test."""
+        self.mocked_feerate = feerate
+
     def estimatefee_hack(self, target, mode):
         # FIXME, this is a hack !
+        err = None
         self.bitcoind_lock.acquire()
-        feerate = self.bitcoind.estimatesmartfee(target, mode)
+        try:
+            feerate = self.bitcoind.estimatesmartfee(target, mode)
+        except Exception as e:
+            err = e
         self.bitcoind_lock.release()
+        if err is not None:
+            raise err
         if "feerate" in feerate:
             return feerate["feerate"]
+        # Don't crash the wallet if fee estimation failed...
         return Decimal(1000) / bitcoin.core.COIN
 
     def test_client(self):

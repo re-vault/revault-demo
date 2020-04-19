@@ -6,6 +6,7 @@ from bip32 import BIP32
 from bitcoin.core import b2x, COIN
 from bitcoin.core.script import SIGHASH_ALL
 from bitcoin.wallet import CKey
+from decimal import Decimal
 from fixtures import *  # noqa: F401,F403
 from utils import wait_for
 
@@ -55,6 +56,12 @@ def test_sigserver_feerate(vault_factory):
     feerate = wallet.sigserver.get_feerate("emergency", txid="high_entropy")
     # sats/vbyte, if it's less there's something going on !
     assert feerate >= 1
+    # Test the mocked feerate
+    mock_sat_vb = Decimal(345)
+    mock_btc_kb = mock_sat_vb / Decimal(COIN) * Decimal(1000)
+    vault_factory.servers_man.sigserv.mock_feerate(mock_btc_kb)
+    mocked_feerate = wallet.sigserver.get_feerate("emergency", txid="ab")
+    assert mocked_feerate == mock_sat_vb
 
 
 def test_signatures_posting(vault_factory):

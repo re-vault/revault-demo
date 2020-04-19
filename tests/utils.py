@@ -410,18 +410,19 @@ class ServersManager:
         self.bitcoind = bitcoind
         self.sigserver_port = reserve()
         self.cosigning_port = reserve()
+        self.sigserv, self.cosigner = [None, None]
 
     def start_servers(self):
         """Starts the sig and cosigning servers."""
-        sigserv = SigServer(bitcoind_conf_path=self.bitcoind.
-                            rpc.__btc_conf_file__)
-        threading.Thread(target=sigserv.run, daemon=True, kwargs={
+        self.sigserv = SigServer(bitcoind_conf_path=self.bitcoind.
+                                 rpc.__btc_conf_file__)
+        threading.Thread(target=self.sigserv.run, daemon=True, kwargs={
             "host": "localhost",
             "port": self.sigserver_port,
             "debug": False,
         }).start()
-        cosigner = CosigningServer()
-        threading.Thread(target=cosigner.run, daemon=True, kwargs={
+        self.cosigner = CosigningServer()
+        threading.Thread(target=self.cosigner.run, daemon=True, kwargs={
             "host": "localhost",
             "port": self.cosigning_port,
             "debug": False,
@@ -435,6 +436,7 @@ class VaultFactory:
         self.vaults = []
         self.sigserver_port = sigserver_port
         self.cosigning_port = cosigning_port
+        self.servers_man = None
 
     def get_wallets(self, emergency_privkeys=None):
         """Get 4 vaults, one for each stakeholder. Spin up the servers."""

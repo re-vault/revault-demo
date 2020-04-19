@@ -117,6 +117,8 @@ def vault_factory(bitcoinds):
     servers_man.start_servers()
     vault_factory = VaultFactory(bitcoinds[1:5], servers_man.sigserver_port,
                                  servers_man.cosigning_port)
+    # YA hack... (This time to mock feerates)
+    vault_factory.servers_man = servers_man
 
     yield vault_factory
 
