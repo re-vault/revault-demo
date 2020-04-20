@@ -449,18 +449,6 @@ def form_spend_tx(tx, pubkeys, serv_pubkey, sigs):
     # Make it immutable
     return CTransaction.from_tx(tx)
 
-
-def get_transaction_size(tx):
-    """Get the size of a CTransaction.
-
-    :param tx: The CTransaction to get the size of.
-
-    :return: (int) The transaction size **in vbytes**
-    """
-    # FIXME: introduce weights into python-bitcoinlib
-    return len(tx.serialize())
-
-
 __all__ = [
     "vault_script",
     "vault_txout",
@@ -482,5 +470,4 @@ __all__ = [
     "create_spend_tx",
     "sign_spend_tx",
     "form_spend_tx",
-    "get_transaction_size",
 ]

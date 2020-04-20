@@ -66,7 +66,6 @@ class SigServer:
                 raise Exception("Unsupported tx type for get_feerate.")
 
             if txid not in self.feerates.keys():
-                print(self.mocked_feerate)
                 if self.mocked_feerate is not None:
                     feerate = self.mocked_feerate
                 elif tx_type == "emergency":
