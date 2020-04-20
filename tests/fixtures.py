@@ -3,6 +3,8 @@ Most of the code here is stolen from C-lightning's test suite. This is surely
 Rusty Russell or Christian Decker who wrote most of this (I'd put some sats on
 cdecker), so credits to them ! (MIT licensed)
 """
+from bitcoin.core import COIN
+from decimal import Decimal
 from utils import BitcoinD, VaultFactory, ServersManager, wait_for
 from revault import SigServer
 
@@ -96,8 +98,8 @@ def bitcoinds(directory):
     wait_for(lambda: all(bit.rpc.getconnectioncount() > 3
                          for bit in bitcoinds))
 
-    # Hand some funds to everyone
-    rounds = 101 // n_bitcoind + 1
+    # Hand some funds to everyone (10 utxos)
+    rounds = 111 // n_bitcoind + 1
     for _ in range(rounds):
         for bitcoind in bitcoinds:
             bitcoind.rpc.generatetoaddress(1, bitcoind.rpc.getnewaddress())
@@ -117,8 +119,11 @@ def vault_factory(bitcoinds):
     servers_man.start_servers()
     vault_factory = VaultFactory(bitcoinds[1:5], servers_man.sigserver_port,
                                  servers_man.cosigning_port)
-    # YA hack... (This time to mock feerates)
+    # YA hack... (This time to mock feerates in tests)
     vault_factory.servers_man = servers_man
+
+    # Bye bye estimatesmartfee
+    servers_man.sigserv.mock_feerate(5 * Decimal(1000) / Decimal(COIN))
 
     yield vault_factory
 

@@ -139,10 +139,9 @@ def test_emergency_broadcast(vault_factory):
     vault = random.choice(wallet.vaults)
     emergency_tx = wallet.get_signed_emergency_tx(vault)
     # The emergency tx must have been signed with ALL at least once !
-    assert any(element[-1] == SIGHASH_ALL
-               for element in emergency_tx.wit.vtxinwit[0].scriptWitness
-               # If this is a signature
-               if len(element) in {70, 71, 72})
+    sigs = [e for txinwit in emergency_tx.wit.vtxinwit
+            for e in txinwit.scriptWitness if len(e) in {70, 71, 72}]
+    assert any(sig[-1] == SIGHASH_ALL for sig in sigs)
     bitcoind.broadcast_and_mine(emergency_tx.serialize().hex())
     wait_for(lambda: wallet.stopped)
 
