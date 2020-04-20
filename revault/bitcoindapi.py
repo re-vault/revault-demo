@@ -2,6 +2,9 @@ import bitcoin.rpc
 import threading
 import time
 
+from bitcoin.core import COIN
+from decimal import Decimal
+
 
 class BitcoindApi:
     """A higher-level wrapper around bitcoind RPC."""
@@ -12,6 +15,7 @@ class BitcoindApi:
         self.bitcoind = bitcoin.rpc.RawProxy(btc_conf_file=conf_file)
         # Needs to be acquired to send RPC commands
         self.bitcoind_lock = threading.Lock()
+        self.mocked_feerate = None
 
     def __del__(self):
         self.close()
@@ -35,6 +39,10 @@ class BitcoindApi:
         if err is not None:
             raise err
         return res
+
+    def mock_feerate(self, feerate):
+        """sat/vbyte !!"""
+        self.mocked_feerate = feerate
 
     def importmultiextended(self, xpubs, birthdate, min_index, max_index):
         """Import a 4-of-4 P2WSH descriptor with 4 xpubs (m/0).
@@ -65,6 +73,17 @@ class BitcoindApi:
     def gettransaction(self, txid):
         return self.call("gettransaction", txid)
 
+    def getrawtransaction(self, txid, decode=False):
+        try:
+            tx = self.call("getrawtransaction", txid, decode)
+            return tx
+        except bitcoin.rpc.JSONRPCError:
+            # In case this is a wallet transaction
+            tx = self.call("gettransaction", txid)
+            if decode:
+                return self.decoderawtransaction(tx["hex"])
+            return tx["hex"]
+
     def decoderawtransaction(self, hex):
         return self.call("decoderawtransaction", hex)
 
@@ -88,6 +107,27 @@ class BitcoindApi:
 
     def importaddress(self, address, label, rescan=True):
         return self.call("importaddress", address, label, rescan)
+
+    def dumpprivkey(self, address):
+        return self.call("dumpprivkey", address)
+
+    def getfeerate(self, type=None):
+        """This mimics the sig server behaviour.
+
+        :returns: The feerate as **sat/vbyte**
+        """
+        if self.mocked_feerate is not None:
+            return self.mocked_feerate
+
+        if type == "emergency":
+            res = self.call("estimatesmartfee", 2,
+                            "CONSERVATIVE")["feerate"] * Decimal(10)
+        elif type == "cancel":
+            res = self.call("estimatesmartfee", 2,
+                            "CONSERVATIVE")["feerate"] * Decimal(5)
+        else:
+            res = self.call("estimatesmartfee", 3, "CONSERVATIVE")["feerate"]
+        return res * Decimal(COIN) / Decimal(1000)
 
     def mine(self, txid):
         while txid not in self.getrawmempool():
@@ -113,4 +153,9 @@ class BitcoindApi:
     def assertmempoolaccept(self, txs):
         """Helper for sanity checks."""
         res = self.call("testmempoolaccept", txs)
-        assert all(tx["allowed"] for tx in res)
+        if not all(tx["allowed"] for tx in res):
+            raise Exception("testmempoolaccept returned {} for {}"
+                            .format(res, txs))
+
+    def tx_size(self, tx):
+        return self.decoderawtransaction(tx.serialize().hex())["vsize"]

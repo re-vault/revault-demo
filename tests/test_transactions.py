@@ -22,7 +22,6 @@ from revault.transactions import (
     create_emer_unvault_tx, sign_emer_unvault_tx, form_emer_unvault_tx,
     create_spend_tx, sign_spend_tx, form_spend_tx,
 )
-from revault.utils import empty_signature
 
 
 bitcoin.SelectParams("regtest")
@@ -132,7 +131,7 @@ def test_unvault_txout(bitcoind):
     # The cosigning server
     sigs = [serv_privkey.sign(tx_hash) + bytes([SIGHASH_ALL])]
     # We fail the third CHECKSIG !!
-    sigs += [empty_signature()]
+    sigs += [bytes(0)]
     sigs += [key.sign(tx_hash) + bytes([SIGHASH_ALL])
              for key in stk_privkeys[::-1][2:]]  # Just the first two
     witness_script = [*sigs,

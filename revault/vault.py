@@ -15,8 +15,8 @@ from .transactions import (
     sign_unvault_tx, form_unvault_tx, create_cancel_tx, sign_cancel_tx,
     form_cancel_tx, create_emer_unvault_tx, sign_emer_unvault_tx,
     form_emer_unvault_tx, create_spend_tx, sign_spend_tx, form_spend_tx,
-    get_transaction_size,
 )
+from .utils import tx_feerate, bump_feerate
 
 
 class Vault:
@@ -226,10 +226,9 @@ class Vault:
         amount = bitcoin.core.COIN
         dummy_tx = create_emergency_vault_tx(lx(vault["txid"]), vault["vout"],
                                              amount, self.emergency_pubkeys)
-        tx_size = get_transaction_size(dummy_tx)
         feerate = self.sigserver.get_feerate("emergency",
                                              dummy_tx.GetTxid().hex())
-        fees = feerate * tx_size
+        fees = feerate * self.bitcoind.tx_size(dummy_tx)
         amount = vault["amount"] - fees
         vault["emergency_tx"] = \
             create_emergency_vault_tx(lx(vault["txid"]), vault["vout"],
@@ -249,9 +248,9 @@ class Vault:
         dummy_tx = create_unvault_tx(lx(vault["txid"]), vault["vout"],
                                      vault["pubkeys"], self.cosigner_pubkey,
                                      dummy_amount)
-        tx_size = get_transaction_size(dummy_tx)
         feerate = self.sigserver.get_feerate("cancel",
                                              dummy_tx.GetTxid().hex())
+        tx_size = self.bitcoind.tx_size(dummy_tx)
         unvault_amount = vault["amount"] - feerate * tx_size
         # We reuse the vault pubkeys for the unvault script
         vault["unvault_tx"] = \
@@ -270,9 +269,9 @@ class Vault:
         # We make the cancel_tx pay to the same script, for simplicity
         dummy_tx = create_cancel_tx(unvault_txid, 0, vault["pubkeys"],
                                     dummy_amount)
-        tx_size = get_transaction_size(dummy_tx)
         feerate = self.sigserver.get_feerate("cancel",
                                              dummy_tx.GetTxid().hex())
+        tx_size = self.bitcoind.tx_size(dummy_tx)
         cancel_amount = unvault_amount - feerate * tx_size
         vault["cancel_tx"] = create_cancel_tx(unvault_txid, 0,
                                               vault["pubkeys"], cancel_amount)
@@ -295,9 +294,9 @@ class Vault:
         # Last one, the emergency_tx
         dummy_tx = create_emer_unvault_tx(unvault_txid, 0,
                                           self.emergency_pubkeys, dummy_amount)
-        tx_size = get_transaction_size(dummy_tx)
         feerate = self.sigserver.get_feerate("emergency",
                                              dummy_tx.GetTxid().hex())
+        tx_size = self.bitcoind.tx_size(dummy_tx)
         emer_amount = unvault_amount - feerate * tx_size
         vault["unvault_emer_tx"] = \
             create_emer_unvault_tx(unvault_txid, 0, self.emergency_pubkeys,
@@ -323,7 +322,22 @@ class Vault:
         if None in vault["emergency_sigs"]:
             return None
 
-        # TODO: Fee bumping
+        feerate = tx_feerate(self.bitcoind, vault["emergency_tx"])
+        minimal_feerate = self.bitcoind.getfeerate("emergency")
+        if feerate < minimal_feerate:
+            sigs = vault["emergency_sigs"].copy()
+            # Replace the ALL signature with a SINGLE one..
+            sig = sign_emergency_vault_tx(vault["emergency_tx"],
+                                          vault["pubkeys"], vault["amount"],
+                                          [vault["privkey"]])[0]
+            sigs[self.keychains.index(None)] = sig
+            # Form the transaction..
+            tx = form_emergency_vault_tx(vault["emergency_tx"],
+                                         vault["pubkeys"], sigs)
+            # And finally amend it and sign it with ALL
+            return bump_feerate(self.bitcoind, tx, minimal_feerate - feerate)
+
+        # No need to bump the fees, keep the ALL signature
         return form_emergency_vault_tx(vault["emergency_tx"],
                                        vault["pubkeys"],
                                        vault["emergency_sigs"])
@@ -339,7 +353,24 @@ class Vault:
         if None in vault["cancel_sigs"]:
             return None
 
-        # TODO: Fee bumping
+        unvault_amount = vault["unvault_tx"].vout[0].nValue
+        feerate = tx_feerate(self.bitcoind, vault["cancel_tx"], unvault_amount)
+        minimal_feerate = self.bitcoind.getfeerate("cancel")
+        if feerate < minimal_feerate:
+            sigs = vault["cancel_sigs"].copy()
+            # Replace the ALL signature by a SINGLE one..
+            sig = sign_cancel_tx(vault["cancel_tx"], [vault["privkey"]],
+                                 vault["pubkeys"], self.cosigner_pubkey,
+                                 unvault_amount)[0]
+            sigs[self.keychains.index(None)] = sig
+            # Form the transaction..
+            tx = form_cancel_tx(vault["cancel_tx"], sigs,
+                                vault["pubkeys"], self.cosigner_pubkey)
+            # And finally amend it and sign it with ALL
+            return bump_feerate(self.bitcoind, tx, minimal_feerate - feerate,
+                                unvault_amount)
+
+        # No need to bump the fees, keep the ALL signature
         return form_cancel_tx(vault["cancel_tx"], vault["cancel_sigs"],
                               vault["pubkeys"], self.cosigner_pubkey)
 
@@ -354,7 +385,24 @@ class Vault:
         if None in vault["unvault_emer_sigs"]:
             return None
 
-        # TODO: Fee bumping
+        unvault_amount = vault["unvault_tx"].vout[0].nValue
+        feerate = tx_feerate(self.bitcoind, vault["unvault_emer_tx"],
+                             unvault_amount)
+        minimal_feerate = self.bitcoind.getfeerate("cancel")
+        if feerate < minimal_feerate:
+            sigs = vault["unvault_emer_sigs"].copy()
+            # Replace the ALL signature by a SINGLE one..
+            sig = sign_emer_unvault_tx(vault["unvault_emer_tx"],
+                                       [vault["privkey"]], vault["pubkeys"],
+                                       self.cosigner_pubkey, unvault_amount)[0]
+            sigs[self.keychains.index(None)] = sig
+            # Form the transaction..
+            tx = form_emer_unvault_tx(vault["unvault_emer_tx"], sigs,
+                                      vault["pubkeys"], self.cosigner_pubkey)
+            # And finally amend it and sign it with ALL
+            return bump_feerate(self.bitcoind, tx, minimal_feerate - feerate,
+                                unvault_amount)
+
         return form_emer_unvault_tx(vault["unvault_emer_tx"],
                                     vault["unvault_emer_sigs"],
                                     vault["pubkeys"],

@@ -8,6 +8,7 @@ from bitcoin.core.script import SIGHASH_ALL
 from bitcoin.wallet import CKey
 from decimal import Decimal
 from fixtures import *  # noqa: F401,F403
+from revault.utils import tx_fees
 from utils import wait_for
 
 
@@ -305,9 +306,10 @@ def test_revoke_spend(vault_factory):
     bitcoind = trader_A.bitcoind
     bitcoind.pay_to(trader_A.getnewaddress(), 10)
     wait_for(lambda: all(len(w.vaults) == 1 for w in wallets))
-    wait_for(lambda: all(v["emergency_signed"] for v in trader_A.vaults))
-    wait_for(lambda: all(v["unvault_signed"] for v in trader_B.vaults))
-    assert all(v["unvault_secure"] for v in trader_A.vaults)
+    for wallet in wallets:
+        wait_for(lambda: all(v["emergency_signed"] for v in wallet.vaults))
+        wait_for(lambda: all(v["unvault_signed"] for v in wallet.vaults))
+        assert all(v["unvault_secure"] for v in wallet.vaults)
 
     # Choose an unauthorized address
     bitcoind.pay_to(trader_A.getnewaddress(), 10)
@@ -337,11 +339,6 @@ def test_revoke_spend(vault_factory):
     bitcoind.broadcast_and_mine(b2x(vault["unvault_tx"].serialize()))
     # At this point we should have remarked the spend, and have broadcast the
     # cancel_tx. This means still len(vaults) == 1, but a different one !
-    # So, we need to wait for everyone to remove the first vault, then add the
-    # second one, but all wallets aren't doing it synchronously ! That's going
-    # to be hacky. From my tests the 4th wallet is the last to be updated.
-    # wait_for(lambda: len(wallets[3].vaults) == 0)
-    # wait_for(lambda: len(wallets[3].vaults) == 1)
     wait_for(lambda: all(len(wallet.vaults) == 1 for wallet in wallets))
     wait_for(lambda: all(wallet.vaults[0]["txid"] != first_vault_txid if
                          len(wallet.vaults) > 0 else False
@@ -351,3 +348,73 @@ def test_revoke_spend(vault_factory):
     with pytest.raises(bitcoin.rpc.VerifyError,
                        match="bad-txns-inputs-missingorspent"):
         bitcoind.broadcast_and_mine(b2x(tx.serialize()))
+
+
+def mock_feerate(vault_factory, wallets, sat_per_vbyte):
+    for wallet in wallets:
+        wallet.bitcoind.mock_feerate(sat_per_vbyte)
+    btc_per_kvbyte = sat_per_vbyte * Decimal(1000) / COIN
+    vault_factory.servers_man.sigserv.mock_feerate(btc_per_kvbyte)
+
+
+def broadcast_unvault(wallets, vault):
+    """This broadcasts the unvault transaction in a clean manner."""
+    trader_A, trader_B = (wallets[0], wallets[1])
+    # FIXME hardcoded fees..
+    spend_amount = vault["amount"] - 50000
+    # We choose a valid address..
+    addresses = {
+        random.choice(trader_A.acked_addresses): spend_amount,
+    }
+    # The first trader creates the tx, signs it, pass both the tx and sig to B
+    trader_A.initiate_spend(vault, addresses)
+    # B hands his signature to A
+    sigB = trader_B.accept_spend(vault["txid"], addresses)
+    pubkeyB = CKey(trader_B.vaults[0]["privkey"]).pub
+    # Then A forms the transaction and tells everyone, we can broadcast it.
+    tx, accepted = trader_A.complete_spend(vault, pubkeyB, sigB, addresses)
+    assert accepted
+    trader_A.bitcoind.broadcast_and_mine(vault["unvault_tx"].serialize().hex())
+
+
+def test_bump_fees(vault_factory):
+    """Test that we bump the fees if a revaulting transaction has a too low
+    feerate at the time of broadcast."""
+    wallets = vault_factory.get_wallets()
+    wallet = random.choice(wallets)
+    bitcoind = wallet.bitcoind
+    mock_feerate(vault_factory, wallets, 5)
+    # Fund the vault
+    wallet.bitcoind.pay_to(wallet.getnewaddress(), 10)
+    wait_for(lambda: all(len(w.vaults) == 1 for w in wallets))
+    for wallet in wallets:
+        wait_for(lambda: all(v["emergency_signed"] for v in wallet.vaults))
+        wait_for(lambda: all(v["unvault_signed"] for v in wallet.vaults))
+        assert all(v["unvault_secure"] for v in wallet.vaults)
+    vault = wallet.vaults[0]
+
+    # The emergency tx
+    tx_before = wallet.get_signed_emergency_tx(vault)
+    mock_feerate(vault_factory, wallets, 10)
+    tx_after = wallet.get_signed_emergency_tx(vault)
+    assert tx_fees(bitcoind, tx_after) > tx_fees(bitcoind, tx_before)
+    bitcoind.assertmempoolaccept([tx_after.serialize().hex()])
+    mock_feerate(vault_factory, wallets, 5)
+
+    # Broadcast the unvault to test the cancel and unvault_emer
+    broadcast_unvault(wallets, vault)
+
+    # The cancel tx
+    tx_before = wallet.get_signed_cancel_tx(vault)
+    mock_feerate(vault_factory, wallets, 10)
+    tx_after = wallet.get_signed_cancel_tx(vault)
+    assert tx_fees(bitcoind, tx_after) > tx_fees(bitcoind, tx_before)
+    bitcoind.assertmempoolaccept([tx_after.serialize().hex()])
+    mock_feerate(vault_factory, wallets, 5)
+
+    # The unvault emergency tx
+    tx_before = wallet.get_signed_unvault_emergency_tx(vault)
+    mock_feerate(vault_factory, wallets, 10)
+    tx_after = wallet.get_signed_unvault_emergency_tx(vault)
+    assert tx_fees(bitcoind, tx_after) > tx_fees(bitcoind, tx_before)
+    bitcoind.assertmempoolaccept([tx_after.serialize().hex()])
