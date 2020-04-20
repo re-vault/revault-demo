@@ -149,10 +149,9 @@ class SigServer:
         self.bitcoind_lock.release()
         if err is not None:
             raise err
-        if "feerate" in feerate:
-            return feerate["feerate"]
-        # Don't crash the wallet if fee estimation failed...
-        return Decimal(1000) / bitcoin.core.COIN
+        if "feerate" not in feerate:
+            raise Exception("Could not estimate fees !")
+        return feerate["feerate"]
 
     def test_client(self):
         return self.server.test_client()

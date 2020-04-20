@@ -438,6 +438,10 @@ class VaultFactory:
         self.cosigning_port = cosigning_port
         self.servers_man = None
 
+    def mock_feerates(self):
+        for wallet in self.vaults:
+            wallet.bitcoind.mock_feerate(5)
+
     def get_wallets(self, emergency_privkeys=None):
         """Get 4 vaults, one for each stakeholder. Spin up the servers."""
         bip32s = [BIP32.from_seed(os.urandom(32), "test") for _ in range(4)]
@@ -456,4 +460,5 @@ class VaultFactory:
             self.vaults.append(Vault(xpriv, xpubs, emergency_pubkeys, conf,
                                      cosigner_url, sigserv_url,
                                      acked_addresses))
+        self.mock_feerates()
         return self.vaults
