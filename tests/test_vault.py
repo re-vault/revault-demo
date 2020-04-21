@@ -124,17 +124,30 @@ def test_emergency_tx_sync(vault_factory):
                    for txid in first_emer_txids)
 
 
+def create_new_vaults(wallets, n):
+    """A helper which creates {n} new vaults, and waits for the wallets to be
+    in sync."""
+    assert all(len(wallet.vaults) == 0 for wallet in wallets)
+    for i in range(n):
+        print(i)
+        wallet = wallets[i % len(wallets)]
+        bitcoind = wallet.bitcoind
+        bitcoind.pay_to(wallet.getnewaddress(), 10)
+        wait_for(lambda: all(len(wallet.vaults) == i + 1
+                             for wallet in wallets))
+        wait_for(lambda: all(wallet.vaults[i]["emergency_signed"]
+                             for wallet in wallets))
+        wait_for(lambda: all(wallet.vaults[i]["unvault_signed"]
+                             for wallet in wallets))
+        assert all(wallet.vaults[i]["unvault_secure"] for wallet in wallets)
+
+
 def test_emergency_broadcast(vault_factory):
     """Test that the emergency transactions we create are valid and can be
     broadcast. Test that if one is broadcast, all are."""
     wallets = vault_factory.get_wallets()
     bitcoind = wallets[0].bitcoind
-    # Sending funds to any vault address will be remarked by anyone
-    for wallet in wallets:
-        bitcoind.pay_to(wallet.getnewaddress(), 10)
-    for wallet in wallets:
-        wait_for(lambda: len(wallet.vaults) == len(wallets))
-        wait_for(lambda: all(v["emergency_signed"] for v in wallet.vaults))
+    create_new_vaults(wallets, 2)
     wallet = random.choice(wallets)
     vault = random.choice(wallet.vaults)
     emergency_tx = wallet.get_signed_emergency_tx(vault)
@@ -205,35 +218,19 @@ def test_tx_chain_sync(vault_factory):
     """Test all vaults will exchange signatures for all transactions"""
     wallets = vault_factory.get_wallets()
     bitcoind = wallets[0].bitcoind
-    # Sending funds to any vault address will be remarked by anyone
-    for wallet in wallets:
-        bitcoind.pay_to(wallet.getnewaddress(), 10)
-    wait_for(lambda: all(len(wallet.vaults) == 4 for wallet in wallets))
-    for wallet in wallets:
-        # Separated for timeout reset..
-        wait_for(lambda: all(v["emergency_signed"] for v in wallet.vaults))
-        wait_for(lambda: all(v["unvault_signed"] for v in wallet.vaults))
-    assert all(v["unvault_secure"] for v in wallet.vaults)
+    create_new_vaults(wallets, 4)
     # We can broadcast the unvault tx for any vault
-    vault = random.choice(wallets)
-    for v in vault.vaults:
+    wallet = random.choice(wallets)
+    for v in wallet.vaults:
         bitcoind.broadcast_and_mine(b2x(v["unvault_tx"].serialize()))
 
 
 def test_cancel_unvault(vault_factory):
     """Test the unvault cancelation (cancel_tx *AND* emer_unvault_tx)"""
     wallets = vault_factory.get_wallets()
-    bitcoind = wallets[0].bitcoind
-    # Sending funds to any vault address will be remarked by anyone
     wallet = random.choice(wallets)
-    for _ in range(2):
-        bitcoind.pay_to(wallet.getnewaddress(), 10)
-    wait_for(lambda: all(len(w.vaults) == 2 for w in wallets))
-    for wallet in wallets:
-        # Separated for timeout reset
-        wait_for(lambda: all(v["emergency_signed"] for v in wallet.vaults))
-        wait_for(lambda: all(v["unvault_signed"] for v in wallet.vaults))
-        assert all(v["unvault_secure"] for v in wallet.vaults)
+    bitcoind = wallet.bitcoind
+    create_new_vaults(wallets, 2)
 
     prev_vault_txid = wallet.vaults[0]["txid"]
     # Send a cancel transaction, it pays to the same script, but the old
@@ -265,16 +262,12 @@ def test_spend_creation(vault_factory):
     wallets = vault_factory.get_wallets()
     trader_A, trader_B = wallets[0], wallets[1]
     bitcoind = trader_A.bitcoind
-    bitcoind.pay_to(trader_A.getnewaddress(), 10)
-    wait_for(lambda: all(len(w.vaults) == 1 for w in wallets))
-    wait_for(lambda: all(v["emergency_signed"] for v in trader_A.vaults))
-    wait_for(lambda: all(v["unvault_signed"] for v in trader_B.vaults))
-    assert all(v["unvault_secure"] for v in trader_A.vaults)
+    create_new_vaults(wallets, 1)
 
     # Try to spend from the newly created vault
     vault = trader_A.vaults[0]
-    # FIXME hardcoded fees..
-    spend_amount = 10 * COIN - 50000
+    unvault_amount = Decimal(vault["unvault_tx"].vout[0].nValue)
+    spend_amount = int(unvault_amount - Decimal(50000))
     # We choose a valid address..
     addresses = {
         random.choice(trader_A.acked_addresses): spend_amount,
@@ -301,27 +294,15 @@ def test_spend_creation(vault_factory):
 def test_revoke_spend(vault_factory):
     """Test that unvaults that aren't authorized are revoked."""
     wallets = vault_factory.get_wallets()
+    create_new_vaults(wallets, 1)
     trader_A, trader_B = wallets[0], wallets[1]
     bitcoind = trader_A.bitcoind
-    bitcoind.pay_to(trader_A.getnewaddress(), 10)
-    wait_for(lambda: all(len(w.vaults) == 1 for w in wallets))
-    for wallet in wallets:
-        wait_for(lambda: all(v["emergency_signed"] for v in wallet.vaults))
-        wait_for(lambda: all(v["unvault_signed"] for v in wallet.vaults))
-        assert all(v["unvault_secure"] for v in wallet.vaults)
 
-    # Choose an unauthorized address
-    bitcoind.pay_to(trader_A.getnewaddress(), 10)
-    wait_for(lambda: all(len(w.vaults) == 1 for w in wallets))
-    for wallet in wallets:
-        wait_for(lambda: all(v["emergency_signed"] for v in wallet.vaults))
-        wait_for(lambda: all(v["unvault_signed"] for v in wallet.vaults))
-        assert all(v["unvault_secure"] for v in wallet.vaults)
     # We spend this one!
     vault = trader_A.vaults[0]
-    # FIXME hardcoded fees..
-    spend_amount = 10 * COIN - 50000
-    # We reuse the same hardcoded amount, and a new address
+    unvault_amount = Decimal(vault["unvault_tx"].vout[0].nValue)
+    spend_amount = int(unvault_amount - Decimal(50000))
+    # Choose an unauthorized address
     addresses = {
         bitcoind.getnewaddress(): spend_amount,
     }
@@ -383,13 +364,7 @@ def test_bump_fees(vault_factory):
     wallet = random.choice(wallets)
     bitcoind = wallet.bitcoind
     mock_feerate(vault_factory, wallets, 5)
-    # Fund the vault
-    wallet.bitcoind.pay_to(wallet.getnewaddress(), 10)
-    wait_for(lambda: all(len(w.vaults) == 1 for w in wallets))
-    for wallet in wallets:
-        wait_for(lambda: all(v["emergency_signed"] for v in wallet.vaults))
-        wait_for(lambda: all(v["unvault_signed"] for v in wallet.vaults))
-        assert all(v["unvault_secure"] for v in wallet.vaults)
+    create_new_vaults(wallets, 1)
     vault = wallet.vaults[0]
 
     # The emergency tx
