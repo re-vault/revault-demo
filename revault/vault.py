@@ -475,7 +475,7 @@ class Vault:
         Note that this main loop used to be somewhat less naïvely implemented,
         but it was both a premature and useless optimisation.
         """
-        while not self.funds_poller_stop.wait(2.0):
+        while not self.funds_poller_stop.wait(5.0):
             # What we think we have
             known_outputs = [v["txid"] for v in self.vaults]
             # What bitcoind tells we *actually* have
