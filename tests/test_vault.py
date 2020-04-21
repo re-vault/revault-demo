@@ -129,7 +129,6 @@ def create_new_vaults(wallets, n):
     in sync."""
     assert all(len(wallet.vaults) == 0 for wallet in wallets)
     for i in range(n):
-        print(i)
         wallet = wallets[i % len(wallets)]
         bitcoind = wallet.bitcoind
         bitcoind.pay_to(wallet.getnewaddress(), 10)
