@@ -75,7 +75,7 @@ The architecture was first designed by [Kevin Loaec](https://twitter.com/KLoaec)
 and improved by both of us (I'm [@darosior](https://github.com/darosior), or
 [Antoine Poinsot](twitter.com/darosior) from [Leonod](https://leonod.com/)).
 
-This architecture was at first comissioned by [NOIA](), a trading fund with bitcoin
+This architecture was at first comissioned by [NOIA](http://noia.capital), a trading fund with bitcoin
 holdings. They were the first to sponsor this work, so big shoutout to them !
 
 Credit is also due to Alekos Filini ([Github](https://github.com/afilini), [Twitter](https://twitter.com/afilini))
