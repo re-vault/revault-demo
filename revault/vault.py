@@ -339,6 +339,18 @@ class Vault:
                                        vault["pubkeys"],
                                        vault["emergency_sigs"])
 
+    def get_signed_unvault_tx(self, vault):
+        """Form and return the unvault transaction for this {vault}.
+
+        :return: The signed unvault transaction, or None if we did not
+                 gathered all the signatures for it.
+        """
+        if None in vault["unvault_sigs"]:
+            return None
+
+        return form_unvault_tx(vault["unvault_tx"], vault["pubkeys"],
+                               vault["unvault_sigs"])
+
     def get_signed_cancel_tx(self, vault):
         """Form and return the cancel transaction for this vault's unvault.
 
@@ -777,9 +789,6 @@ class Vault:
                     self.vaults_lock.release()
 
         self.vaults_lock.acquire()
-        vault["unvault_tx"] = form_unvault_tx(vault["unvault_tx"],
-                                              vault["pubkeys"],
-                                              vault["unvault_sigs"])
         vault["unvault_signed"] = True
         self.vaults_lock.release()
 

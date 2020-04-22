@@ -59,7 +59,7 @@ def test_sigserver_feerate(vault_factory):
     assert feerate >= 1
     # Test the mocked feerate
     mock_sat_vb = Decimal(345)
-    mock_btc_kb = mock_sat_vb / Decimal(COIN) * Decimal(1000)
+    mock_btc_kb = mock_sat_vb * Decimal(1000) / Decimal(COIN)
     vault_factory.servers_man.sigserv.mock_feerate(mock_btc_kb)
     mocked_feerate = wallet.sigserver.get_feerate("emergency", txid="ab")
     assert mocked_feerate == mock_sat_vb
@@ -190,7 +190,8 @@ def test_vault_address_reuse(vault_factory):
     pubkeyB = CKey(trader_B.vaults[0]["privkey"]).pub
     tx, spend_accepted = trader_A.complete_spend(v, pubkeyB, sigB, addresses)
     assert spend_accepted
-    bitcoind.broadcast_and_mine(b2x(v["unvault_tx"].serialize()))
+    bitcoind.broadcast_and_mine(trader_A.get_signed_unvault_tx(v)
+                                .serialize().hex())
 
     # At this point we should have remarked the spend, and have removed the
     # vault.
@@ -220,7 +221,8 @@ def test_tx_chain_sync(vault_factory):
     # We can broadcast the unvault tx for any vault
     wallet = random.choice(wallets)
     for v in wallet.vaults:
-        bitcoind.broadcast_and_mine(b2x(v["unvault_tx"].serialize()))
+        bitcoind.broadcast_and_mine(wallet.get_signed_unvault_tx(v)
+                                    .serialize().hex())
 
 
 def test_cancel_unvault(vault_factory):
@@ -233,7 +235,7 @@ def test_cancel_unvault(vault_factory):
     prev_vault_txid = wallet.vaults[0]["txid"]
     # Send a cancel transaction, it pays to the same script, but the old
     # vault is deleted from our view
-    bitcoind.broadcast_and_mine(wallet.vaults[0]["unvault_tx"]
+    bitcoind.broadcast_and_mine(wallet.get_signed_unvault_tx(wallet.vaults[0])
                                 .serialize().hex())
     # This will trigger cancel transaction broadcast, as we don't know about
     # the spend, and create the same number of vaults, so check their ids !
@@ -245,8 +247,8 @@ def test_cancel_unvault(vault_factory):
     assert all(v["unvault_secure"] for v in wallet.vaults)
 
     # Send an emergency transaction, this time no new vault created !
-    bitcoind.broadcast_and_mine(b2x(wallet.vaults[1]["unvault_tx"]
-                                    .serialize()))
+    bitcoind.broadcast_and_mine(wallet.get_signed_unvault_tx(wallet.vaults[1])
+                                .serialize().hex())
     unvault_emer = wallet.get_signed_unvault_emergency_tx(wallet.vaults[1])
     assert unvault_emer is not None
     bitcoind.broadcast_and_mine(unvault_emer.serialize().hex())
@@ -264,8 +266,8 @@ def test_spend_creation(vault_factory):
 
     # Try to spend from the newly created vault
     vault = trader_A.vaults[0]
-    unvault_amount = Decimal(vault["unvault_tx"].vout[0].nValue)
-    spend_amount = int(unvault_amount - Decimal(50000))
+    unvault_amount = vault["unvault_tx"].vout[0].nValue
+    spend_amount = unvault_amount - 50000
     # We choose a valid address..
     addresses = {
         random.choice(trader_A.acked_addresses): spend_amount,
@@ -279,7 +281,8 @@ def test_spend_creation(vault_factory):
     # Then A forms the transaction and tells everyone, we can broadcast it.
     tx, accepted = trader_A.complete_spend(vault, pubkeyB, sigB, addresses)
     assert accepted
-    bitcoind.broadcast_and_mine(b2x(vault["unvault_tx"].serialize()))
+    bitcoind.broadcast_and_mine(trader_A.get_signed_unvault_tx(vault)
+                                .serialize().hex())
     # At this point we should have remarked the spend, and have removed
     # the vault.
     wait_for(lambda: all(len(w.vaults) == 0 for w in wallets))
@@ -298,8 +301,8 @@ def test_revoke_spend(vault_factory):
 
     # We spend this one!
     vault = trader_A.vaults[0]
-    unvault_amount = Decimal(vault["unvault_tx"].vout[0].nValue)
-    spend_amount = int(unvault_amount - Decimal(50000))
+    unvault_amount = vault["unvault_tx"].vout[0].nValue
+    spend_amount = unvault_amount - 50000
     # Choose an unauthorized address
     addresses = {
         bitcoind.getnewaddress(): spend_amount,
@@ -314,7 +317,8 @@ def test_revoke_spend(vault_factory):
     tx, accepted = trader_A.complete_spend(vault, pubkeyB, sigB, addresses)
     assert not accepted
     first_vault_txid = vault["txid"]
-    bitcoind.broadcast_and_mine(b2x(vault["unvault_tx"].serialize()))
+    bitcoind.broadcast_and_mine(trader_A.get_signed_unvault_tx(vault)
+                                .serialize().hex())
     # At this point we should have remarked the spend, and have broadcast the
     # cancel_tx. This means still len(vaults) == 1, but a different one !
     wait_for(lambda: all(len(wallet.vaults) == 1 for wallet in wallets))
@@ -351,7 +355,8 @@ def broadcast_unvault(wallets, vault):
     # Then A forms the transaction and tells everyone, we can broadcast it.
     tx, accepted = trader_A.complete_spend(vault, pubkeyB, sigB, addresses)
     assert accepted
-    trader_A.bitcoind.broadcast_and_mine(vault["unvault_tx"].serialize().hex())
+    trader_A.bitcoind.broadcast_and_mine(trader_A.get_signed_unvault_tx(vault)
+                                         .serialize().hex())
 
 
 def test_bump_fees(vault_factory):
