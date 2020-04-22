@@ -691,30 +691,27 @@ class Vault:
     def poll_for_spends(self):
         """Poll the sigserver for spend requests.
 
-        Accept the spend if now the spend, refuse otherwise.
+        Accept the spend if we know the address, refuse otherwise.
         """
+        # We do this indefinitely, so we'd better cache the ones we know about
         known_spends = []
         while not self.spends_poller_stop.wait(3.0):
             spends = self.sigserver.get_spends()
             for txid in [txid for txid, addresses in spends.items()
                          if txid not in known_spends]:
-                # This monstruous pattern is unavailable to my tired brain in a
-                # hurry..
-                accept = False
-                for address in spends[txid]:
-                    if address in self.vault_addresses:
-                        # This is the change !
-                        continue
-                    if address in self.acked_addresses:
-                        accept = True
-                    else:
-                        accept = False
-                        break
-                if accept:
+                valid_addresses = self.vault_addresses + self.acked_addresses
+                # If an output pays to an unknown address refuse.
+                if any([address not in valid_addresses
+                        for address in spends[txid]]):
+                    self.sigserver.refuse_spend(txid, spends[txid])
+                # If there is no output to a known address (just change),
+                # refuse.
+                elif any([address not in self.acked_addresses
+                          for address in spends[txid]]):
+                    self.sigserver.refuse_spend(txid, spends[txid])
+                else:
                     self.sigserver.accept_spend(txid, spends[txid])
                     self.acked_spends.append(txid)
-                else:
-                    self.sigserver.refuse_spend(txid, spends[txid])
                 known_spends.append(txid)
 
     def update_emergency_signatures(self, vault):
