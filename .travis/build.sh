@@ -17,4 +17,5 @@ python3 -m venv venv
 pip install -r requirements.txt -r tests/requirements.txt
 
 python3 setup.py install
-pytest -vvv tests/
+pytest -vvv tests/test_transactions.py
+pytest -vvv tests/test_vault.py
