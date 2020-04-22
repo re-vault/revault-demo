@@ -1,7 +1,6 @@
 import requests
 
 from bitcoin.core import COIN
-from decimal import Decimal
 
 
 class ServerApi:
@@ -65,9 +64,9 @@ class ServerApi:
         if not r.status_code == 200:
             raise Exception("The sigserver returned with '{}', saying '{}'"
                             .format(r.status_code, r.text))
-        btc_perkvb = Decimal(r.json()["feerate"])
+        btc_perkvb = r.json()["feerate"]
         # Explicit conversion to sat per virtual byte
-        return int(btc_perkvb * Decimal(COIN) / Decimal(1000))
+        return btc_perkvb * COIN / 1000
 
     def request_spend(self, vault_txid, addresses):
         r = requests.post("{}/requestspend".format(self.url), json={
