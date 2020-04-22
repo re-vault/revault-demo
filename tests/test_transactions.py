@@ -201,7 +201,7 @@ def test_unvault_tx(bitcoind):
                               amount_min_fees)
     assert len(unvtx.vout) == 1
     # Simulate that each stakeholder sign the transaction separately
-    sigs = [sign_unvault_tx(unvtx, stk_pubkeys, amount, [k])[0]
+    sigs = [sign_unvault_tx(unvtx, [k], stk_pubkeys, amount)[0]
             for k in stk_privkeys]
     unvtx = form_unvault_tx(unvtx, stk_pubkeys, sigs)
     bitcoind.send_tx(b2x(unvtx.serialize()))
@@ -223,7 +223,7 @@ def test_emergency_vault_tx(bitcoind):
     emer_tx = create_emergency_vault_tx(vault_txid, 0, amount_min_fees,
                                         emer_pubkeys)
     # Simulate that each stakeholder sign the transaction separately
-    sigs = [sign_emergency_vault_tx(emer_tx, stk_pubkeys, amount, [k])[0]
+    sigs = [sign_emergency_vault_tx(emer_tx, [k], stk_pubkeys, amount)[0]
             for k in stk_privkeys]
     emer_tx = form_emergency_vault_tx(emer_tx, stk_pubkeys, sigs)
     bitcoind.send_tx(b2x(emer_tx.serialize()))
@@ -235,7 +235,7 @@ def send_unvault_tx(bitcoind, stk_privkeys, stk_pubkeys, serv_pubkey,
     unvtx = create_unvault_tx(vault_txid, 0, stk_pubkeys, serv_pubkey,
                               amount_unvault)
     assert len(unvtx.vout) == 1 and len(unvtx.vin) == 1
-    sigs = sign_unvault_tx(unvtx, stk_pubkeys, amount_vault, stk_privkeys)
+    sigs = sign_unvault_tx(unvtx, stk_privkeys, stk_pubkeys, amount_vault)
     unvtx = form_unvault_tx(unvtx, stk_pubkeys, sigs)
     bitcoind.send_tx(b2x(unvtx.serialize()))
     return unvtx.GetTxid()
@@ -454,7 +454,7 @@ def test_increase_revault_tx_feerate(bitcoind):
     txid = send_vault_tx(bitcoind, stk_pubkeys, amount_vault)
     amount_emer = amount_vault - 500
     CTx = create_emergency_vault_tx(lx(txid), 0, amount_emer, emer_pubkeys)
-    sigs = [sign_emergency_vault_tx(CTx, stk_pubkeys, amount_vault, [p])[0]
+    sigs = [sign_emergency_vault_tx(CTx, [p], stk_pubkeys, amount_vault)[0]
             for p in stk_privkeys]
     # Sanity checks don't hurt
     assert all(sig[-1] == SIGHASH_SINGLE | SIGHASH_ANYONECANPAY

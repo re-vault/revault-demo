@@ -231,13 +231,14 @@ class Vault:
             create_emergency_vault_tx(lx(vault["txid"]), vault["vout"],
                                       amount, self.emergency_pubkeys)
         # Sign the one we keep with ALL..
-        sig = sign_emergency_vault_tx(vault["emergency_tx"], vault["pubkeys"],
-                                      vault["amount"], [vault["privkey"]],
-                                      sign_all=True)[0]
+        sig = sign_emergency_vault_tx(vault["emergency_tx"],
+                                      [vault["privkey"]], vault["pubkeys"],
+                                      vault["amount"], sign_all=True)[0]
         vault["emergency_sigs"][self.keychains.index(None)] = sig
         # .. And the one we share with SINGLE | ANYONECANPAY
-        return sign_emergency_vault_tx(vault["emergency_tx"], vault["pubkeys"],
-                                       vault["amount"], [vault["privkey"]])[0]
+        return sign_emergency_vault_tx(vault["emergency_tx"],
+                                       [vault["privkey"]], vault["pubkeys"],
+                                       vault["amount"])[0]
 
     def create_sign_unvault(self, vault):
         """Create and return our signature for the unvault tx."""
@@ -254,8 +255,8 @@ class Vault:
             create_unvault_tx(lx(vault["txid"]), vault["vout"],
                               vault["pubkeys"], self.cosigner_pubkey,
                               unvault_amount)
-        return sign_unvault_tx(vault["unvault_tx"], vault["pubkeys"],
-                               vault["amount"], [vault["privkey"]])[0]
+        return sign_unvault_tx(vault["unvault_tx"], [vault["privkey"]],
+                               vault["pubkeys"], vault["amount"])[0]
 
     def create_sign_cancel(self, vault):
         """Create and return our signature for the unvault cancel tx."""
@@ -325,8 +326,8 @@ class Vault:
             sigs = vault["emergency_sigs"].copy()
             # Replace the ALL signature with a SINGLE one..
             sig = sign_emergency_vault_tx(vault["emergency_tx"],
-                                          vault["pubkeys"], vault["amount"],
-                                          [vault["privkey"]])[0]
+                                          [vault["privkey"]], vault["pubkeys"],
+                                          vault["amount"])[0]
             sigs[self.keychains.index(None)] = sig
             # Form the transaction..
             tx = form_emergency_vault_tx(vault["emergency_tx"],

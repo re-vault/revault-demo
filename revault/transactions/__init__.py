@@ -141,16 +141,17 @@ def create_unvault_tx(vault_txid, vault_vout, pubkeys, pub_server, value):
     return create_spend_vault_txout(vault_txid, vault_vout, txout)
 
 
-def sign_unvault_tx(tx, pubkeys, prev_value, privkeys):
+def sign_unvault_tx(tx, privkeys, pubkeys, prev_value):
     """Signs the unvaulting transaction.
 
     As it's not a revaulting transaction it's signed with SIGHASH_ALL.
-    We can imagine updating this transaction as the fees evolve, though.
+    We can imagine updating this transaction as the fees evolve, though (but
+    always with SIGHASH_ALL !).
 
-    :param vault_txid: The id of the transaction funding the vault.
+    :param tx: The id of the transaction funding the vault.
+    :param privkeys: A list of the private keys to sign the transaction with.
     :param pubkeys: A list containing the public key of each stakeholder.
     :param prev_value: The vault output (previout output) value in satoshis.
-    :param privkeys: A list of the private keys to sign the transaction with.
 
     :return: The signatures in the same order as the given privkeys.
     """
@@ -190,7 +191,7 @@ def create_emergency_vault_tx(vault_txid, vault_vout, value, emer_pubkeys):
     return create_spend_vault_txout(vault_txid, vault_vout, txout)
 
 
-def sign_emergency_vault_tx(tx, pubkeys, prev_value, privkeys,
+def sign_emergency_vault_tx(tx, privkeys, pubkeys, prev_value,
                             sign_all=False):
     """Signs the transaction which moves a vault's coins to the offline 4of4.
 
@@ -200,10 +201,9 @@ def sign_emergency_vault_tx(tx, pubkeys, prev_value, privkeys,
     the feerate by appending an input and an output.
 
     :param vault_txid: The id of the transaction funding the vault, as bytes.
+    :param privkeys: A list of the private keys to sign the transaction with.
     :param pubkeys: A list containing the public key of each stakeholder.
     :param prev_value: The vault output (previout output) value in satoshis.
-    :param privkeys: A list of the private keys of the four stakeholders to
-                     sign the transaction.
     :param sign_all: If set to True, sign we SIGHASH_ALL instead.
 
     :return: A list, one signature per given privkey.
@@ -448,6 +448,7 @@ def form_spend_tx(tx, pubkeys, serv_pubkey, sigs):
     tx.wit = CTxWitness([witness])
     # Make it immutable
     return CTransaction.from_tx(tx)
+
 
 __all__ = [
     "vault_script",
