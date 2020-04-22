@@ -1,4 +1,5 @@
 import bitcoin.rpc
+import logging
 import threading
 import time
 
@@ -12,6 +13,7 @@ class BitcoindApi:
         """
         :param conf_file: The bitcoind configuration file.
         """
+        self.conf_path = conf_file
         self.bitcoind = bitcoin.rpc.RawProxy(btc_conf_file=conf_file)
         # Needs to be acquired to send RPC commands
         self.bitcoind_lock = threading.Lock()
@@ -32,8 +34,31 @@ class BitcoindApi:
         self.bitcoind_lock.acquire()
         try:
             res = f(*args)
-        except Exception as e:
+        except bitcoin.rpc.JSONRPCError as e:
+            # Don't retry those
             err = e
+        except Exception as e:
+            # FIXME: this block is a hack to workaround the proxy flakiness
+            logging.warning("Encountered error '{}' while calling '{}' with {}"
+                            .format(name, args, str(e)))
+            try:
+                self.close()
+                self.bitcoind = bitcoin.rpc.RawProxy(
+                    btc_conf_file=self.conf_path
+                )
+                import http
+                while True:
+                    try:
+                        f = getattr(self.bitcoind, name)
+                        break
+                    except http.client.ResponseNotReady:
+                        time.sleep(0.5)
+                    except Exception as e:
+                        err = e
+                        break
+                res = f(*args)
+            except Exception as e:
+                err = e
         self.bitcoind_lock.release()
 
         if err is not None:
@@ -144,7 +169,7 @@ class BitcoindApi:
     def pay_to(self, address, amount):
         """A helper for the functional tests.."""
         addr = self.call("getnewaddress")
-        while self.bitcoind.getbalance() < amount + 1:
+        while self.call("getbalance") < amount + 1:
             self.call("generatetoaddress", 1, addr)
         txid = self.sendtoaddress(address, amount)
         self.mine(txid)
