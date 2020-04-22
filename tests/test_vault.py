@@ -327,9 +327,14 @@ def test_revoke_spend(vault_factory):
                          for wallet in wallets))
     addr = bitcoind.getnewaddress()
     bitcoind.generatetoaddress(5, addr)
-    with pytest.raises(bitcoin.rpc.VerifyError,
-                       match="bad-txns-inputs-missingorspent"):
-        bitcoind.broadcast_and_mine(b2x(tx.serialize()))
+    try:
+        with pytest.raises(bitcoin.rpc.VerifyError,
+                           match="bad-txns-inputs-missingorspent"):
+            bitcoind.broadcast_and_mine(b2x(tx.serialize()))
+    except AssertionError:
+        with pytest.raises(bitcoin.rpc.VerifyError,
+                           match="Missing inputs"):
+            bitcoind.broadcast_and_mine(b2x(tx.serialize()))
 
 
 def mock_feerate(vault_factory, wallets, sat_per_vbyte):
