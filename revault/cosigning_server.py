@@ -39,9 +39,10 @@ class CosigningServer:
 
             spend_tx = create_spend_tx(lx(txid), 0, addresses)
             pubkeys = [bytes.fromhex(pub) for pub in pubkeys]
-            sigs = sign_spend_tx(spend_tx, [self.privkey], pubkeys,
-                                 self.pubkey, prev_value)
-            return jsonify({"sig": sigs[0].hex()}), 200
+            return jsonify({
+                "sig": sign_spend_tx(spend_tx, self.privkey, pubkeys,
+                                     self.pubkey, prev_value).hex(),
+            }), 200
 
         @self.server.route("/getpubkey", methods=["GET"])
         def get_pubkey():
