@@ -178,7 +178,6 @@ def test_vault_address_reuse(vault_factory):
     v = random.choice(trader_A.vaults)
     # And the second trader will sign with us the spend
     trader_B = wallets[1]
-    # FIXME hardcoded fees..
     spend_amount = 12 * COIN - 50000
     # We choose a valid address..
     addresses = {
@@ -339,7 +338,6 @@ def mock_feerate(vault_factory, wallets, sat_per_vbyte):
 def broadcast_unvault(wallets, vault):
     """This broadcasts the unvault transaction in a clean manner."""
     trader_A, trader_B = (wallets[0], wallets[1])
-    # FIXME hardcoded fees..
     spend_amount = vault["amount"] - 50000
     # We choose a valid address..
     addresses = {

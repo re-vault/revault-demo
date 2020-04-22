@@ -5,7 +5,7 @@ import time
 from bip32 import BIP32
 from bitcoin.core import lx, COIN
 from bitcoin.wallet import CBitcoinAddress, CKey
-from decimal import Decimal, getcontext
+from decimal import Decimal
 from .bitcoindapi import BitcoindApi
 from .cosigningapi import CosigningApi
 from .serverapi import ServerApi
@@ -101,9 +101,6 @@ class Vault:
         # signatures and some useful fields (like "are all txs signed ?").
         self.vaults = []
         self.vaults_lock = threading.Lock()
-
-        # Small bitcoin amounts don't play well..
-        getcontext().prec = 8
 
         # Poll for funds until we die
         self.funds_poller_stop = threading.Event()

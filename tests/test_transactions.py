@@ -12,7 +12,7 @@ from bitcoin.core.script import (
     SIGVERSION_WITNESS_V0, SignatureHash, OP_0,
 )
 from bitcoin.wallet import CBitcoinAddress, CKey
-from decimal import Decimal, getcontext
+from decimal import Decimal
 from fixtures import *  # noqa: F401,F403
 from revault.transactions import (
     vault_txout, vault_script, unvault_txout, unvault_script, emergency_txout,
@@ -25,8 +25,6 @@ from revault.transactions import (
 
 
 bitcoin.SelectParams("regtest")
-# FIXME !
-getcontext().prec = 8
 
 
 def test_vault_txout(bitcoind):
