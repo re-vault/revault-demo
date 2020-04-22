@@ -1,6 +1,10 @@
 language: python
 dist: bionic
 
+cache:
+  directories:
+    - dependencies
+
 notifications:
   email: false
 
