@@ -42,7 +42,7 @@ Of course, transactions are signed backward (à la payment channels).
 
 A stakeholder can revoke a spend to an (unknown / untrusted address) during the CSV delay.
 
-More details are available in the [architecture document](doc/archi.pdf).
+More details are available in the [architecture document](doc/archi.pdf) [EDIT: it's outdated for now!].
 
 [1] These N keys are preferably held by each stakeholder in some place which are both hard
 to access and geographically distant.
