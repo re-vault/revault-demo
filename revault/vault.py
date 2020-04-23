@@ -492,6 +492,8 @@ class Vault:
             known_outputs = [v["txid"] for v in self.vaults]
             # What bitcoind tells we *actually* have
             current_utxos = self.bitcoind.listunspent(
+                # Should not be 0 if it was "for real" (cancel_tx's id isn't
+                # known for sure)
                 minconf=0,
                 addresses=self.vault_addresses
             )
