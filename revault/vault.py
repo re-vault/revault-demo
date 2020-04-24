@@ -230,6 +230,10 @@ class Vault:
         vault["emergency_tx"] = \
             create_emergency_vault_tx(lx(vault["txid"]), vault["vout"],
                                       amount, self.emergency_pubkeys)
+        # Hello SIGHASH_SINGLE
+        assert (len(vault["emergency_tx"].vin)
+                == len(vault["emergency_tx"].vout) == 1)
+
         # Sign the one we keep with ALL..
         sig = sign_emergency_vault_tx(vault["emergency_tx"], vault["privkey"],
                                       vault["pubkeys"], vault["amount"],
@@ -272,6 +276,10 @@ class Vault:
         cancel_amount = unvault_amount - feerate * tx_size
         vault["cancel_tx"] = create_cancel_tx(unvault_txid, 0,
                                               vault["pubkeys"], cancel_amount)
+        # Hello SIGHASH_SINGLE
+        assert (len(vault["cancel_tx"].vin)
+                == len(vault["cancel_tx"].vout) == 1)
+
         # It wants the pubkeys for the prevout script, but they are the same!
         sig = sign_cancel_tx(vault["cancel_tx"], vault["privkey"],
                              vault["pubkeys"], self.cosigner_pubkey,
@@ -298,6 +306,10 @@ class Vault:
         vault["unvault_emer_tx"] = \
             create_emer_unvault_tx(unvault_txid, 0, self.emergency_pubkeys,
                                    emer_amount)
+        # Hello SIGHASH_SINGLE
+        assert (len(vault["unvault_emer_tx"].vin)
+                == len(vault["unvault_emer_tx"].vout) == 1)
+
         # Sign the one we keep with ALL..
         sig = sign_emer_unvault_tx(vault["unvault_emer_tx"], vault["privkey"],
                                    vault["pubkeys"], self.cosigner_pubkey,
