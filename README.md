@@ -73,7 +73,7 @@ My focus is currently the feerate problem.
 The architecture was first designed by [Kevin Loaec](https://twitter.com/KLoaec) from
 [Chainsmiths](https://chainsmiths.com/) and has been worked (eventually somewhat implemented),
 and improved by both of us (I'm [@darosior](https://github.com/darosior), or
-[Antoine Poinsot](twitter.com/darosior) from [Leonod](https://leonod.com/)).
+[Antoine Poinsot](https://twitter.com/darosior) from [Leonod](https://leonod.com/)).
 
 This architecture was at first comissioned by [NOIA](http://noia.capital), a trading fund with bitcoin
 holdings. They were the first to sponsor this work, so big shoutout to them !
