@@ -90,7 +90,7 @@ def emergency_txout(pubkeys, value):
     return CTxOut(value, p2wsh)
 
 
-def create_spend_vault_txout(vault_txid, vault_vout, txout):
+def create_spend_vault_txout(vault_txid, vault_vout, txout, rbf=False):
     """Creates a transaction spending a vault txout.
 
     Note that this transaction only ever has one input and one output.
@@ -98,10 +98,12 @@ def create_spend_vault_txout(vault_txid, vault_vout, txout):
     :param vault_txid: The id of the transaction funding the vault, as bytes.
     :param vault_vout: The index of the vault output in this transaction.
     :param txout: The CTxOut to pay to.
+    :param rbf: If set to true, signal for RBF.
 
     :return: The *unsigned* transaction, a CMutableTransaction.
     """
-    tmp_txin = CTxIn(COutPoint(vault_txid, vault_vout))
+    sequence = 0xfffffffe if rbf else 0xffffffff
+    tmp_txin = CTxIn(COutPoint(vault_txid, vault_vout), nSequence=sequence)
     return CMutableTransaction([tmp_txin], [txout], nVersion=2)
 
 
@@ -186,7 +188,7 @@ def create_emergency_vault_tx(vault_txid, vault_vout, value, emer_pubkeys):
     :return: The unsigned emergency transaction, a CMutableTransaction.
     """
     txout = emergency_txout(emer_pubkeys, value)
-    return create_spend_vault_txout(vault_txid, vault_vout, txout)
+    return create_spend_vault_txout(vault_txid, vault_vout, txout, rbf=True)
 
 
 def sign_emergency_vault_tx(tx, privkey, pubkeys, prev_value,
@@ -227,16 +229,18 @@ def form_emergency_vault_tx(tx, pubkeys, sigs):
     return form_spend_vault_txout(tx, pubkeys, sigs)
 
 
-def create_unvault_spend(unvault_txid, unvault_vout, txout):
+def create_unvault_spend(unvault_txid, unvault_vout, txout, rbf=False):
     """Creates a transaction spending from an unvault transaction.
 
     :param unvault_txid: The id of the unvaulting transaction.
     :param unvault_vout: The index of the unvault output in this transaction.
     :param txout: The txo (a CTxOut) to spend the coins to.
+    :param rbf: If set to True, signal RBF.
 
     :return: The unsigned transaction, a CMutableTransaction.
     """
-    txin = CTxIn(COutPoint(unvault_txid, unvault_vout))
+    sequence = 0xfffffffe if rbf else 0xffffffff
+    txin = CTxIn(COutPoint(unvault_txid, unvault_vout), nSequence=sequence)
     return CMutableTransaction([txin], [txout], nVersion=2)
 
 
@@ -300,7 +304,7 @@ def create_cancel_tx(unvault_txid, unvault_vout, pubkeys, value):
     """
     # We pay back to a vault
     txout = vault_txout(pubkeys, value)
-    return create_unvault_spend(unvault_txid, unvault_vout, txout)
+    return create_unvault_spend(unvault_txid, unvault_vout, txout, rbf=True)
 
 
 def sign_cancel_tx(tx, privkey, pubkeys, pub_server, prev_value,
@@ -348,7 +352,7 @@ def create_emer_unvault_tx(unvault_txid, unvault_vout, emer_pubkeys, value):
     """
     # We pay to the emergency script
     txout = emergency_txout(emer_pubkeys, value)
-    return create_unvault_spend(unvault_txid, unvault_vout, txout)
+    return create_unvault_spend(unvault_txid, unvault_vout, txout, rbf=True)
 
 
 def sign_emer_unvault_tx(tx, privkey, pubkeys, pub_server, prev_value,

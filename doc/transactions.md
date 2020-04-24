@@ -104,7 +104,7 @@ an on-going spending from a vault.
 - count: 1
 - inputs[0]:
     - txid: `<unvault_tx txid>`
-    - sequence: `0xffffffff`
+    - sequence: `0xfffffffe`
     - scriptSig: `<empty>`
     - witness: `0 <sig pubkey1> <sig pubkey2> <sig pubkey3> <sig pubkey4> <unvault_tx's locking script>`
 
@@ -133,7 +133,7 @@ being differents from the vault keys).
 - count: 1
 - inputs[0]:
     - txid: `<vault_tx txid>`
-    - sequence: `0xffffffff`
+    - sequence: `0xfffffffe`
     - scriptSig: `<empty>`
     - witness: `0 <sig pubkey1> <sig pubkey2> <sig pubkey3> <sig pubkey4> <vault_tx's locking script>`
 
@@ -160,7 +160,7 @@ being differents from the vault keys).
 - count: 1
 - inputs[0]:
     - txid: `<unvault_tx txid>`
-    - sequence: `0xffffffff`
+    - sequence: `0xfffffffe`
     - scriptSig: `<empty>`
     - witness: `0 <sig pubkey1> <sig pubkey2> <sig pubkey3> <sig pubkey4> <unvault_tx's locking script>`
 
