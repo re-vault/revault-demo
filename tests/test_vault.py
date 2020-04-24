@@ -101,29 +101,6 @@ def test_emergency_sig_sharing(vault_factory):
              is not None)
 
 
-def test_emergency_tx_sync(vault_factory):
-    """Test that we correctly share and gather emergency transactions
-    signatures."""
-    wallets = vault_factory.get_wallets()
-    bitcoind = wallets[0].bitcoind
-    # Sending funds to any vault address will be remarked by anyone
-    for wallet in wallets:
-        bitcoind.pay_to(wallet.getnewaddress(), 10)
-    wait_for(lambda: all(len(wallet.vaults) == len(wallets)
-                         for wallet in wallets))
-    for wallet in wallets:
-        wait_for(lambda: all(vault["emergency_signed"]
-                             for vault in wallet.vaults))
-    # All nodes should have the same unsigned emergency transactions
-    for i in range(len(wallets) - 1):
-        first_emer_txids = [v["emergency_tx"].GetTxid()
-                            for v in wallets[i].vaults]
-        second_emer_txids = [v["emergency_tx"].GetTxid()
-                             for v in wallets[i + 1].vaults]
-        assert all(txid == second_emer_txids[first_emer_txids.index(txid)]
-                   for txid in first_emer_txids)
-
-
 def create_new_vaults(wallets, n):
     """A helper which creates {n} new vaults, and waits for the wallets to be
     in sync."""
@@ -139,6 +116,21 @@ def create_new_vaults(wallets, n):
         wait_for(lambda: all(wallet.vaults[i]["unvault_signed"]
                              for wallet in wallets))
         assert all(wallet.vaults[i]["unvault_secure"] for wallet in wallets)
+
+
+def test_emergency_tx_sync(vault_factory):
+    """Test that we correctly share and gather emergency transactions
+    signatures."""
+    wallets = vault_factory.get_wallets()
+    create_new_vaults(wallets, len(wallets))
+    # All nodes should have the same unsigned emergency transactions
+    for i in range(len(wallets) - 1):
+        first_emer_txids = [v["emergency_tx"].GetTxid()
+                            for v in wallets[i].vaults]
+        second_emer_txids = [v["emergency_tx"].GetTxid()
+                             for v in wallets[i + 1].vaults]
+        assert all(txid == second_emer_txids[first_emer_txids.index(txid)]
+                   for txid in first_emer_txids)
 
 
 def test_emergency_broadcast(vault_factory):
