@@ -1,4 +1,5 @@
 import bitcoin
+import hashlib
 import os
 import pytest
 
@@ -52,6 +53,46 @@ def test_vault_txout(bitcoind):
          }
     ])
     bitcoind.send_tx(tx["hex"])
+    assert bitcoind.has_utxo(addr)
+
+
+def test_big_vault_txout(bitcoind):
+    """Test that vault_txout() produces a valid output."""
+    from bitcoin.core.script import (
+        OP_CHECKSIG, OP_ADD, OP_SWAP, OP_NUMEQUAL
+    )
+
+    privkeys = [CKey(os.urandom(32)) for _ in range(67)]
+    pubkeys = [k.pub for k in privkeys]
+    amount = 50 * COIN - 500
+
+    script = [pubkeys[0], OP_CHECKSIG]
+    for pubkey in pubkeys[1:]:
+        script += [OP_SWAP, pubkey, OP_CHECKSIG, OP_ADD]
+    script += [len(pubkeys), OP_NUMEQUAL]
+    vault_script = CScript(script)
+    p2wsh = CScript([OP_0, hashlib.sha256(vault_script).digest()])
+    vault_txo = CTxOut(amount, p2wsh)
+    addr = str(CBitcoinAddress.from_scriptPubKey(vault_txo.scriptPubKey))
+    # This makes a transaction with only one vout
+    txid = bitcoind.pay_to(addr, amount / COIN)
+    print(bitcoind.rpc.getrawtransaction(txid))
+
+    new_amount = amount - 2500
+    addr = bitcoind.getnewaddress()
+    dest_txo = CTxOut(new_amount, CBitcoinAddress(addr).to_scriptPubKey())
+    vault_txin = CTxIn(COutPoint(lx(txid), 0))
+    tx = CMutableTransaction([vault_txin], [dest_txo])
+    tx_hash = SignatureHash(vault_script, tx, 0,
+                            SIGHASH_ALL, amount=amount,
+                            sigversion=SIGVERSION_WITNESS_V0)
+    sigs = [k.sign(tx_hash) + bytes([SIGHASH_ALL]) for k in privkeys]
+    witness_script = [*sigs[::-1], vault_script]
+    witness = CTxInWitness(CScriptWitness(witness_script))
+    tx.wit = CTxWitness([witness])
+
+    print(tx.serialize().hex())
+    bitcoind.send_tx(tx.serialize().hex())
     assert bitcoind.has_utxo(addr)
 
 
