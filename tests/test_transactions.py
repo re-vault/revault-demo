@@ -96,6 +96,110 @@ def test_big_vault_txout(bitcoind):
     assert bitcoind.has_utxo(addr)
 
 
+def test_big_unvault_txout(bitcoind):
+    """Test that vault_txout() produces a valid output."""
+    from bitcoin.core.script import (
+        OP_CHECKSIG, OP_IF, OP_ELSE, OP_ENDIF,
+        OP_CHECKSEQUENCEVERIFY, OP_CHECKSIGVERIFY, OP_DROP
+    )
+    # This dirty test doesnt handle n_participants == n_traders
+    n_participants = 15
+    n_traders = 6
+
+    part_privkeys = [CKey(os.urandom(32)) for _ in range(n_participants)]
+    part_pubkeys = [k.pub for k in part_privkeys]
+    trad_privkeys = [part_privkeys[i] for i in range(n_traders)]
+    trad_pubkeys = [k.pub for k in trad_privkeys]
+    cosig_privkeys = [CKey(os.urandom(32)) for _ in range(n_participants -
+                                                          n_traders)]
+    cosig_pubkeys = [k.pub for k in cosig_privkeys]
+
+    amount = 50 * COIN - 500
+
+    script = []
+    # All branchs needs the traders sigs
+    for pubkey in trad_pubkeys:
+        script += [pubkey, OP_CHECKSIGVERIFY]
+    # If it wants to spend the all-sign path
+    script += [OP_IF]
+    for pubkey in part_pubkeys[len(trad_pubkeys):-1]:
+        script += [pubkey, OP_CHECKSIGVERIFY]
+    # The strict "1 must remain on the stack" rule
+    script += [part_pubkeys[-1], OP_CHECKSIG]
+    # Otherwise, we lock for 6 blocks and need the cosigning servers sigs
+    script += [OP_ELSE, 6, OP_CHECKSEQUENCEVERIFY, OP_DROP]
+    for pubkey in cosig_pubkeys[:-1]:
+        script += [pubkey, OP_CHECKSIGVERIFY]
+    # The strict "1 must remain on the stack" rule
+    script += [cosig_pubkeys[-1], OP_CHECKSIG, OP_ENDIF]
+
+    unvault_script = CScript(script)
+    p2wsh = CScript([OP_0, hashlib.sha256(unvault_script).digest()])
+    unvault_txo = CTxOut(amount, p2wsh)
+    addr = str(CBitcoinAddress.from_scriptPubKey(unvault_txo.scriptPubKey))
+
+    # This makes a transaction with only one vout
+    txid = bitcoind.pay_to(addr, amount / COIN)
+    print(bitcoind.rpc.getrawtransaction(txid))  # For btcdeb --txin
+
+    # Try the everyone-is-signing path
+    new_amount = amount - 2500
+    addr = bitcoind.getnewaddress()
+    dest_txo = CTxOut(new_amount, CBitcoinAddress(addr).to_scriptPubKey())
+    unvault_txin = CTxIn(COutPoint(lx(txid), 0))
+    tx = CMutableTransaction([unvault_txin], [dest_txo], nVersion=2)
+    tx_hash = SignatureHash(unvault_script, tx, 0,
+                            SIGHASH_ALL, amount=amount,
+                            sigversion=SIGVERSION_WITNESS_V0)
+    trad_sigs = [k.sign(tx_hash) + bytes([SIGHASH_ALL]) for k in
+                 part_privkeys[:len(trad_privkeys)]]
+    other_sigs = [k.sign(tx_hash) + bytes([SIGHASH_ALL]) for k in
+                  part_privkeys[len(trad_privkeys):]]
+    witness_script = [*other_sigs[::-1], b'\x01', *trad_sigs[::-1],
+                      unvault_script]
+    witness = CTxInWitness(CScriptWitness(witness_script))
+    tx.wit = CTxWitness([witness])
+
+    print(tx.serialize().hex())
+    bitcoind.send_tx(tx.serialize().hex())
+    assert bitcoind.has_utxo(addr)
+
+    # Now the timelocked path CODE DUPLICATION GO BRRRRRR
+
+    unvault_script = CScript(script)
+    p2wsh = CScript([OP_0, hashlib.sha256(unvault_script).digest()])
+    unvault_txo = CTxOut(amount, p2wsh)
+    addr = str(CBitcoinAddress.from_scriptPubKey(unvault_txo.scriptPubKey))
+    # This makes a transaction with only one vout
+    txid = bitcoind.pay_to(addr, amount / COIN)
+    print(bitcoind.rpc.getrawtransaction(txid))  # For btcdeb --txin
+
+    new_amount = amount - 2500
+    addr = bitcoind.getnewaddress()
+    dest_txo = CTxOut(new_amount, CBitcoinAddress(addr).to_scriptPubKey())
+    unvault_txin = CTxIn(COutPoint(lx(txid), 0), nSequence=6)
+    tx = CMutableTransaction([unvault_txin], [dest_txo], nVersion=2)
+    tx_hash = SignatureHash(unvault_script, tx, 0,
+                            SIGHASH_ALL, amount=amount,
+                            sigversion=SIGVERSION_WITNESS_V0)
+    trad_sigs = [k.sign(tx_hash) + bytes([SIGHASH_ALL]) for k in trad_privkeys]
+    cosigs = [k.sign(tx_hash) + bytes([SIGHASH_ALL]) for k in cosig_privkeys]
+    witness_script = [*cosigs[::-1], bytes(0), *trad_sigs[::-1],
+                      unvault_script]
+    witness = CTxInWitness(CScriptWitness(witness_script))
+    tx.wit = CTxWitness([witness])
+
+    print(tx.serialize().hex())
+    # Relative locktime !
+    for i in range(5):
+        with pytest.raises(VerifyRejectedError, match="non-BIP68-final"):
+            bitcoind.send_tx(b2x(tx.serialize()))
+        bitcoind.generate_block(1)
+    # It's been 6 blocks now
+    bitcoind.send_tx(b2x(tx.serialize()))
+    assert bitcoind.has_utxo(addr)
+
+
 def test_unvault_txout(bitcoind):
     """Test that unvault_txout() produces a valid and conform txo.
 
