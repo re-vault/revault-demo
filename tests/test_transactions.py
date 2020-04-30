@@ -57,7 +57,6 @@ def test_vault_txout(bitcoind):
 
 
 def test_big_vault_txout(bitcoind):
-    """Test that vault_txout() produces a valid output."""
     from bitcoin.core.script import (
         OP_CHECKSIG, OP_CHECKSIGVERIFY
     )
@@ -97,7 +96,6 @@ def test_big_vault_txout(bitcoind):
 
 
 def test_big_unvault_txout(bitcoind):
-    """Test that vault_txout() produces a valid output."""
     from bitcoin.core.script import (
         OP_CHECKSIG, OP_IF, OP_ELSE, OP_ENDIF,
         OP_CHECKSEQUENCEVERIFY, OP_CHECKSIGVERIFY, OP_DROP
@@ -198,6 +196,175 @@ def test_big_unvault_txout(bitcoind):
     # It's been 6 blocks now
     bitcoind.send_tx(b2x(tx.serialize()))
     assert bitcoind.has_utxo(addr)
+
+
+def get_tx_weight(bitcoind, tx):
+    return bitcoind.rpc.decoderawtransaction(tx.serialize().hex())["weight"]
+
+
+def test_unvault_size(bitcoind):
+    """A hack to print the size of the unvault according to the number of
+    participants."""
+    from bitcoin.core.script import (
+        OP_CHECKSIG, OP_IF, OP_ELSE, OP_ENDIF,
+        OP_CHECKSEQUENCEVERIFY, OP_CHECKSIGVERIFY, OP_DROP
+    )
+    for n_participants in range(4, 68):
+        n_traders = n_participants // 2
+        print("Number of participants: {}, number in the subset: {}"
+              .format(n_participants, n_traders))
+
+        part_privkeys = [CKey(os.urandom(32)) for _ in range(n_participants)]
+        part_pubkeys = [k.pub for k in part_privkeys]
+        trad_privkeys = [part_privkeys[i] for i in range(n_traders)]
+        trad_pubkeys = [k.pub for k in trad_privkeys]
+        cosig_privkeys = [CKey(os.urandom(32)) for _ in range(n_participants -
+                                                              n_traders)]
+        cosig_pubkeys = [k.pub for k in cosig_privkeys]
+
+        vault_amount = 50 * COIN - 500
+
+        # First pay to a vault
+        vscript = []
+        for pubkey in part_pubkeys[:-1]:
+            vscript += [pubkey, OP_CHECKSIGVERIFY]
+        vscript += [part_pubkeys[-1], OP_CHECKSIG]
+        vault_script = CScript(vscript)
+        p2wsh = CScript([OP_0, hashlib.sha256(vault_script).digest()])
+        vault_txo = CTxOut(vault_amount, p2wsh)
+        vault_addr = str(CBitcoinAddress
+                         .from_scriptPubKey(vault_txo.scriptPubKey))
+        # This makes a transaction with only one vout
+        txid = bitcoind.pay_to(vault_addr, vault_amount / COIN)
+
+        # Now make an unvault tx which spends it
+        uvscript = []
+        # All branchs needs the traders sigs
+        for pubkey in trad_pubkeys:
+            uvscript += [pubkey, OP_CHECKSIGVERIFY]
+        # If it wants to spend the all-sign path
+        uvscript += [OP_IF]
+        for pubkey in part_pubkeys[len(trad_pubkeys):-1]:
+            uvscript += [pubkey, OP_CHECKSIGVERIFY]
+        # The strict "1 must remain on the stack" rule
+        uvscript += [part_pubkeys[-1], OP_CHECKSIG]
+        # Otherwise, we lock for 6 blocks and need the cosigning servers sigs
+        uvscript += [OP_ELSE, 6, OP_CHECKSEQUENCEVERIFY, OP_DROP]
+        for pubkey in cosig_pubkeys[:-1]:
+            uvscript += [pubkey, OP_CHECKSIGVERIFY]
+        # The strict "1 must remain on the stack" rule
+        uvscript += [cosig_pubkeys[-1], OP_CHECKSIG, OP_ENDIF]
+
+        unvault_script = CScript(uvscript)
+        p2wsh = CScript([OP_0, hashlib.sha256(unvault_script).digest()])
+        unvault_txo = CTxOut(0, p2wsh)
+        unvault_addr = str(CBitcoinAddress
+                           .from_scriptPubKey(unvault_txo.scriptPubKey))
+
+        unvault_amount = vault_amount - 5000
+        dest_txo = CTxOut(unvault_amount,
+                          CBitcoinAddress(unvault_addr).to_scriptPubKey())
+        vault_txin = CTxIn(COutPoint(lx(txid), 0))
+        tx = CMutableTransaction([vault_txin], [dest_txo])
+        tx_hash = SignatureHash(vault_script, tx, 0,
+                                SIGHASH_ALL, amount=vault_amount,
+                                sigversion=SIGVERSION_WITNESS_V0)
+        sigs = [k.sign(tx_hash) + bytes([SIGHASH_ALL])
+                for k in part_privkeys]
+        witness_script = [*sigs[::-1], vault_script]
+        witness = CTxInWitness(CScriptWitness(witness_script))
+        tx.wit = CTxWitness([witness])
+
+        print("Size of the unvault tx: {} WU"
+              .format(get_tx_weight(bitcoind, tx)))
+        bitcoind.send_tx(tx.serialize().hex())
+
+        # Try the everyone-is-signing path
+        new_amount = unvault_amount - 2500
+        addr = bitcoind.getnewaddress()
+        dest_txo = CTxOut(new_amount, CBitcoinAddress(addr).to_scriptPubKey())
+        unvault_txin = CTxIn(COutPoint(tx.GetTxid(), 0))
+        tx = CMutableTransaction([unvault_txin], [dest_txo], nVersion=2)
+        tx_hash = SignatureHash(unvault_script, tx, 0,
+                                SIGHASH_ALL, amount=unvault_amount,
+                                sigversion=SIGVERSION_WITNESS_V0)
+        trad_sigs = [k.sign(tx_hash) + bytes([SIGHASH_ALL]) for k in
+                     part_privkeys[:len(trad_privkeys)]]
+        other_sigs = [k.sign(tx_hash) + bytes([SIGHASH_ALL]) for k in
+                      part_privkeys[len(trad_privkeys):]]
+        witness_script = [*other_sigs[::-1], b'\x01', *trad_sigs[::-1],
+                          unvault_script]
+        witness = CTxInWitness(CScriptWitness(witness_script))
+        tx.wit = CTxWitness([witness])
+
+        print("Size of the revaulting txs: {} WU"
+              .format(get_tx_weight(bitcoind, tx)))
+        bitcoind.send_tx(tx.serialize().hex())
+        assert bitcoind.has_utxo(addr)
+
+        # Now the timelocked path CODE DUPLICATION GO BRRRRRR
+
+        # First pay to a vault
+        vscript = []
+        for pubkey in part_pubkeys[:-1]:
+            vscript += [pubkey, OP_CHECKSIGVERIFY]
+        vscript += [part_pubkeys[-1], OP_CHECKSIG]
+        vault_script = CScript(vscript)
+        p2wsh = CScript([OP_0, hashlib.sha256(vault_script).digest()])
+        vault_txo = CTxOut(vault_amount, p2wsh)
+        vault_addr = str(CBitcoinAddress
+                         .from_scriptPubKey(vault_txo.scriptPubKey))
+        # This makes a transaction with only one vout
+        txid = bitcoind.pay_to(vault_addr, vault_amount / COIN)
+
+        unvault_script = CScript(uvscript)
+        p2wsh = CScript([OP_0, hashlib.sha256(unvault_script).digest()])
+        unvault_txo = CTxOut(0, p2wsh)
+        unvault_addr = str(CBitcoinAddress
+                           .from_scriptPubKey(unvault_txo.scriptPubKey))
+
+        unvault_amount = vault_amount - 5000
+        dest_txo = CTxOut(unvault_amount,
+                          CBitcoinAddress(unvault_addr).to_scriptPubKey())
+        vault_txin = CTxIn(COutPoint(lx(txid), 0))
+        tx = CMutableTransaction([vault_txin], [dest_txo])
+        tx_hash = SignatureHash(vault_script, tx, 0,
+                                SIGHASH_ALL, amount=vault_amount,
+                                sigversion=SIGVERSION_WITNESS_V0)
+        sigs = [k.sign(tx_hash) + bytes([SIGHASH_ALL])
+                for k in part_privkeys]
+        witness_script = [*sigs[::-1], vault_script]
+        witness = CTxInWitness(CScriptWitness(witness_script))
+        tx.wit = CTxWitness([witness])
+        bitcoind.send_tx(tx.serialize().hex())
+
+        new_amount = unvault_amount - 2500
+        addr = bitcoind.getnewaddress()
+        dest_txo = CTxOut(new_amount, CBitcoinAddress(addr).to_scriptPubKey())
+        unvault_txin = CTxIn(COutPoint(tx.GetTxid(), 0), nSequence=6)
+        tx = CMutableTransaction([unvault_txin], [dest_txo], nVersion=2)
+        tx_hash = SignatureHash(unvault_script, tx, 0,
+                                SIGHASH_ALL, amount=unvault_amount,
+                                sigversion=SIGVERSION_WITNESS_V0)
+        trad_sigs = [k.sign(tx_hash) + bytes([SIGHASH_ALL])
+                     for k in trad_privkeys]
+        cosigs = [k.sign(tx_hash) + bytes([SIGHASH_ALL])
+                  for k in cosig_privkeys]
+        witness_script = [*cosigs[::-1], bytes(0), *trad_sigs[::-1],
+                          unvault_script]
+        witness = CTxInWitness(CScriptWitness(witness_script))
+        tx.wit = CTxWitness([witness])
+
+        print("Size of the spend tx: {} WU"
+              .format(get_tx_weight(bitcoind, tx)))
+        # Relative locktime !
+        bitcoind.generate_block(5)
+        # It's been 6 blocks now
+        bitcoind.send_tx(b2x(tx.serialize()))
+        assert bitcoind.has_utxo(addr)
+        print("============================================\n\n")
+
+    assert False  # Show the prints
 
 
 def test_unvault_txout(bitcoind):
