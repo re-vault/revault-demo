@@ -59,17 +59,17 @@ def test_vault_txout(bitcoind):
 def test_big_vault_txout(bitcoind):
     """Test that vault_txout() produces a valid output."""
     from bitcoin.core.script import (
-        OP_CHECKSIG, OP_ADD, OP_SWAP, OP_NUMEQUAL
+        OP_CHECKSIG, OP_CHECKSIGVERIFY
     )
 
-    privkeys = [CKey(os.urandom(32)) for _ in range(67)]
+    privkeys = [CKey(os.urandom(32)) for _ in range(100)]
     pubkeys = [k.pub for k in privkeys]
     amount = 50 * COIN - 500
 
-    script = [pubkeys[0], OP_CHECKSIG]
-    for pubkey in pubkeys[1:]:
-        script += [OP_SWAP, pubkey, OP_CHECKSIG, OP_ADD]
-    script += [len(pubkeys), OP_NUMEQUAL]
+    script = []
+    for pubkey in pubkeys[:-1]:
+        script += [pubkey, OP_CHECKSIGVERIFY]
+    script += [pubkeys[-1], OP_CHECKSIG]
     vault_script = CScript(script)
     p2wsh = CScript([OP_0, hashlib.sha256(vault_script).digest()])
     vault_txo = CTxOut(amount, p2wsh)
@@ -78,7 +78,7 @@ def test_big_vault_txout(bitcoind):
     txid = bitcoind.pay_to(addr, amount / COIN)
     print(bitcoind.rpc.getrawtransaction(txid))
 
-    new_amount = amount - 2500
+    new_amount = amount - 5000
     addr = bitcoind.getnewaddress()
     dest_txo = CTxOut(new_amount, CBitcoinAddress(addr).to_scriptPubKey())
     vault_txin = CTxIn(COutPoint(lx(txid), 0))
@@ -103,8 +103,8 @@ def test_big_unvault_txout(bitcoind):
         OP_CHECKSEQUENCEVERIFY, OP_CHECKSIGVERIFY, OP_DROP
     )
     # This dirty test doesnt handle n_participants == n_traders
-    n_participants = 15
-    n_traders = 6
+    n_participants = 68
+    n_traders = 34
 
     part_privkeys = [CKey(os.urandom(32)) for _ in range(n_participants)]
     part_pubkeys = [k.pub for k in part_privkeys]
