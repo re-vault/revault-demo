@@ -230,7 +230,8 @@ class Vault:
         vault["emergency_tx"] = \
             create_emergency_vault_tx(lx(vault["txid"]), vault["vout"],
                                       amount, self.emergency_pubkeys)
-        # Hello SIGHASH_SINGLE
+        # We onced used SIGHASH_SINGLE, so I added that. But let's keep it :
+        # this assumption still holds.
         assert (len(vault["emergency_tx"].vin)
                 == len(vault["emergency_tx"].vout) == 1)
 
@@ -239,7 +240,7 @@ class Vault:
                                       vault["pubkeys"], vault["amount"],
                                       sign_all=True)
         vault["emergency_sigs"][self.keychains.index(None)] = sig
-        # .. And the one we share with SINGLE | ANYONECANPAY
+        # .. And the one we share with ALL | ANYONECANPAY
         return sign_emergency_vault_tx(vault["emergency_tx"], vault["privkey"],
                                        vault["pubkeys"], vault["amount"])
 
@@ -276,7 +277,8 @@ class Vault:
         cancel_amount = unvault_amount - feerate * tx_size
         vault["cancel_tx"] = create_cancel_tx(unvault_txid, 0,
                                               vault["pubkeys"], cancel_amount)
-        # Hello SIGHASH_SINGLE
+        # We onced used SIGHASH_SINGLE, so I added that. But let's keep it :
+        # this assumption still holds.
         assert (len(vault["cancel_tx"].vin)
                 == len(vault["cancel_tx"].vout) == 1)
 
@@ -286,7 +288,7 @@ class Vault:
                              unvault_amount, sign_all=True)
         vault["cancel_sigs"][self.keychains.index(None)] = sig
 
-        # Sign the one we share with SINGLE | ANYONECANPAY
+        # Sign the one we share with ALL | ANYONECANPAY
         return sign_cancel_tx(vault["cancel_tx"], vault["privkey"],
                               vault["pubkeys"], self.cosigner_pubkey,
                               unvault_amount)
@@ -306,7 +308,8 @@ class Vault:
         vault["unvault_emer_tx"] = \
             create_emer_unvault_tx(unvault_txid, 0, self.emergency_pubkeys,
                                    emer_amount)
-        # Hello SIGHASH_SINGLE
+        # We onced used SIGHASH_SINGLE, so I added that. But let's keep it :
+        # this assumption still holds.
         assert (len(vault["unvault_emer_tx"].vin)
                 == len(vault["unvault_emer_tx"].vout) == 1)
 
@@ -315,7 +318,7 @@ class Vault:
                                    vault["pubkeys"], self.cosigner_pubkey,
                                    unvault_amount)
         vault["unvault_emer_sigs"][self.keychains.index(None)] = sig
-        # .. And the one we share with SINGLE | ANYONECANPAY
+        # .. And the one we share with ALL | ANYONECANPAY
         return sign_emer_unvault_tx(vault["unvault_emer_tx"], vault["privkey"],
                                     vault["pubkeys"], self.cosigner_pubkey,
                                     unvault_amount)
@@ -335,7 +338,7 @@ class Vault:
         minimal_feerate = self.bitcoind.getfeerate("emergency")
         if feerate < minimal_feerate:
             sigs = vault["emergency_sigs"].copy()
-            # Replace the ALL signature with a SINGLE one..
+            # Replace the ALL signature with a ALL|ANYONECANPAY one..
             sig = sign_emergency_vault_tx(vault["emergency_tx"],
                                           vault["privkey"], vault["pubkeys"],
                                           vault["amount"])
@@ -379,7 +382,7 @@ class Vault:
         minimal_feerate = self.bitcoind.getfeerate("cancel")
         if feerate < minimal_feerate:
             sigs = vault["cancel_sigs"].copy()
-            # Replace the ALL signature by a SINGLE one..
+            # Replace the ALL signature by a ALL|ANYONECANPAY one..
             sig = sign_cancel_tx(vault["cancel_tx"], vault["privkey"],
                                  vault["pubkeys"], self.cosigner_pubkey,
                                  unvault_amount)
@@ -412,7 +415,7 @@ class Vault:
         minimal_feerate = self.bitcoind.getfeerate("cancel")
         if feerate < minimal_feerate:
             sigs = vault["unvault_emer_sigs"].copy()
-            # Replace the ALL signature by a SINGLE one..
+            # Replace the ALL signature by a ALL|ANYONECANPAY one..
             sig = sign_emer_unvault_tx(vault["unvault_emer_tx"],
                                        vault["privkey"], vault["pubkeys"],
                                        self.cosigner_pubkey, unvault_amount)
@@ -741,6 +744,7 @@ class Vault:
             for i in range(1, 5):
                 if vault["emergency_sigs"][i - 1] is None:
                     self.vaults_lock.acquire()
+                    # FIXME: This MUST be ANYONECANPAY !!
                     vault["emergency_sigs"][i - 1] = \
                         self.sigserver.get_signature(txid, i)
                     self.vaults_lock.release()
@@ -766,6 +770,7 @@ class Vault:
             for i in range(1, 5):
                 if vault["unvault_emer_sigs"][i - 1] is None:
                     self.vaults_lock.acquire()
+                    # FIXME: This MUST be ANYONECANPAY !!
                     vault["unvault_emer_sigs"][i - 1] = \
                         self.sigserver.get_signature(txid, i)
                     self.vaults_lock.release()
@@ -780,6 +785,7 @@ class Vault:
             for i in range(1, 5):
                 if vault["cancel_sigs"][i - 1] is None:
                     self.vaults_lock.acquire()
+                    # FIXME: This MUST be ANYONECANPAY !!
                     vault["cancel_sigs"][i - 1] = \
                         self.sigserver.get_signature(txid, i)
                     self.vaults_lock.release()

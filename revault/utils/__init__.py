@@ -1,13 +1,12 @@
 from base58 import b58decode_check
 from bitcoin.core import (
-    CTxIn, CTxOut, COutPoint, CTxWitness, CTxInWitness,
-    CMutableTxIn, CMutableTxOut, CMutableTransaction, COIN, CScript,
-    Hash160, b2lx, lx,
+    CTxIn, COutPoint, CTxWitness, CTxInWitness, CMutableTxIn, CMutableTxOut,
+    CMutableTransaction, COIN, b2lx, lx,
 )
 from bitcoin.core.script import (
-    CScriptWitness, SIGHASH_ALL, SIGVERSION_WITNESS_V0, SignatureHash, OP_0,
+    CScriptWitness, SIGHASH_ALL, SIGVERSION_WITNESS_V0, SignatureHash,
 )
-from bitcoin.wallet import CBitcoinAddress, CKey
+from bitcoin.wallet import P2WPKHBitcoinAddress, CKey
 from decimal import Decimal
 
 
@@ -56,7 +55,7 @@ def fees_to_add(bitcoind, tx, feerate, prevouts_amount):
     # Yeah we are not smart. That's a demo.
     new_size = bitcoind.tx_size(tx) + 31 + 67
     new_fees = (current_feerate + feerate) * new_size
-    return new_fees - current_fees
+    return int(new_fees - current_fees)
 
 
 def wif_decode(wif_privkey):
@@ -67,27 +66,38 @@ def wif_decode(wif_privkey):
     return decoded_wif
 
 
-def add_input_output(bitcoind, tx, coin, fees):
-    """Add another input to the transaction to bump the feerate."""
-    coin_amount = Decimal(coin["amount"]) * Decimal(COIN)
-    # First get the private key from bitcoind's wallet.
-    privkey = CKey(wif_decode(bitcoind.dumpprivkey(coin["address"])))
+def get_output_index(decoded_tx, sats):
+    for output in decoded_tx["vout"]:
+        if output["value"] * COIN == sats:
+            return decoded_tx["vout"].index(output)
 
+    raise Exception("No such output !")
+
+
+def add_input(bitcoind, tx, fees):
+    """Add another input to the transaction to bump the feerate."""
+    # Don't be dust!
+    if fees < 294:
+        fees = 294
+
+    # Create the first stage transaction
+    new_prevout_addr = P2WPKHBitcoinAddress(bitcoind.getnewaddress())
+    txid = bitcoind.sendtoaddress(str(new_prevout_addr), fees / COIN)
+    out_index = get_output_index(
+        bitcoind.getrawtransaction(txid, decode=True), fees
+    )
+    # Then gather the private key to unlock its output
+    privkey = CKey(wif_decode(bitcoind.dumpprivkey(str(new_prevout_addr))))
     # Add the fetched coin as a new input.
-    tx.vin.append(CTxIn(COutPoint(lx(coin["txid"]), coin["vout"])))
-    # And likely add an output, otherwise all goes to the fees.
-    scriptPubKey = CScript([OP_0, Hash160(privkey.pub)])
-    if coin_amount > fees + 294:
-        # For simplicity, pay to the same script
-        tx.vout.append(CTxOut(coin_amount - Decimal(fees), scriptPubKey))
-    address = CBitcoinAddress.from_scriptPubKey(scriptPubKey)
+    tx.vin.append(CTxIn(COutPoint(lx(txid), out_index)))
     # We only do this once, sign it with ALL
-    tx_hash = SignatureHash(address.to_redeemScript(), tx, 1, SIGHASH_ALL,
-                            int(coin_amount), SIGVERSION_WITNESS_V0)
+    tx_hash = SignatureHash(new_prevout_addr.to_redeemScript(), tx, 1,
+                            SIGHASH_ALL, fees, SIGVERSION_WITNESS_V0)
     sig = privkey.sign(tx_hash) + bytes([SIGHASH_ALL])
     tx.wit.vtxinwit.append(
         CTxInWitness(CScriptWitness([sig, privkey.pub]))
     )
+
     return tx
 
 
@@ -104,17 +114,17 @@ def bump_feerate(bitcoind, tx, feerate_add, prevouts_amount=None):
     # Work on a copy
     vin = [CMutableTxIn.from_txin(txin) for txin in tx.vin]
     vout = [CMutableTxOut.from_txout(txout) for txout in tx.vout]
+    # FIXME: Add this to python-bitcoinlib
     wit = CTxWitness([CTxInWitness.from_txinwitness(txinwit)
                       for txinwit in tx.wit.vtxinwit])
     mut_tx = CMutableTransaction(vin, vout, witness=wit,
                                  nLockTime=tx.nLockTime, nVersion=tx.nVersion)
 
     fees = fees_to_add(bitcoind, mut_tx, feerate_add, prevouts_amount)
-    # No smart coin selection here, this is a demo
-    for coin in bitcoind.listunspent():
-        if coin["amount"] * Decimal(COIN) > fees and coin["spendable"]:
-            return add_input_output(bitcoind, mut_tx, coin, fees)
-    raise Exception("Could not bump fees, no suitable utxo!")
+    if bitcoind.getbalance() * COIN > fees:
+        return add_input(bitcoind, mut_tx, fees)
+
+    raise Exception("Could not bump fees, no suitable utxo available!")
 
 
 __all__ = [

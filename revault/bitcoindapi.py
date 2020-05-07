@@ -136,6 +136,9 @@ class BitcoindApi:
     def dumpprivkey(self, address):
         return self.call("dumpprivkey", address)
 
+    def getbalance(self):
+        return self.call("getbalance")
+
     def getfeerate(self, type=None):
         """This mimics the sig server behaviour.
 
@@ -169,7 +172,7 @@ class BitcoindApi:
     def pay_to(self, address, amount):
         """A helper for the functional tests.."""
         addr = self.call("getnewaddress")
-        while self.call("getbalance") < amount + 1:
+        while self.getbalance() < amount + 1:
             self.call("generatetoaddress", 1, addr)
         txid = self.sendtoaddress(address, amount)
         self.mine(txid)

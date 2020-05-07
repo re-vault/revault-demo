@@ -137,14 +137,14 @@ def test_emergency_broadcast(vault_factory):
     """Test that the emergency transactions we create are valid and can be
     broadcast. Test that if one is broadcast, all are."""
     wallets = vault_factory.get_wallets()
-    bitcoind = wallets[0].bitcoind
     create_new_vaults(wallets, 2)
     wallet = random.choice(wallets)
+    bitcoind = wallet.bitcoind
     vault = random.choice(wallet.vaults)
     emergency_tx = wallet.get_signed_emergency_tx(vault)
     # The emergency tx must have been signed with ALL at least once !
     sigs = [e for txinwit in emergency_tx.wit.vtxinwit
-            for e in txinwit.scriptWitness if len(e) in {70, 71, 72}]
+            for e in txinwit.scriptWitness if len(e) in {71, 72, 73}]
     assert any(sig[-1] == SIGHASH_ALL for sig in sigs)
     bitcoind.broadcast_and_mine(emergency_tx.serialize().hex())
     wait_for(lambda: wallet.stopped)
