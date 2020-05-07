@@ -8,7 +8,7 @@ from bitcoin.core import (
 )
 from bitcoin.rpc import VerifyRejectedError
 from bitcoin.core.script import (
-    CScriptWitness, SIGHASH_ALL, SIGHASH_SINGLE, SIGHASH_ANYONECANPAY,
+    CScriptWitness, SIGHASH_ALL, SIGHASH_ANYONECANPAY,
     SIGVERSION_WITNESS_V0, SignatureHash, OP_0,
 )
 from bitcoin.wallet import CBitcoinAddress, CKey
@@ -404,23 +404,42 @@ def test_spend_unvault_tx_trader_A(bitcoind):
     assert bitcoind.has_utxo(addr)
 
 
-def add_input_output(bitcoind, tx):
-    """Add an input and an output to a CMutableTransaction, SIGHASH_ALL."""
+def get_output_index(decoded_tx, sats):
+    for output in decoded_tx["vout"]:
+        if output["value"] * COIN == sats:
+            return decoded_tx["vout"].index(output)
+
+    raise Exception("No such output !")
+
+
+def creates_add_input(bitcoind, tx):
+    """Creates and add an input to a CMutableTransaction, SIGHASH_ALL.
+
+    :returns: The txid of the first stage fee bumping tx (for convenience)
+    """
     # First we get some coins
     privkey = CKey(os.urandom(32))
     scriptPubKey = CScript([OP_0, Hash160(privkey.pub)])
     address = CBitcoinAddress.from_scriptPubKey(scriptPubKey)
-    amount = Decimal("50") * Decimal(COIN) - Decimal("500")
-    # This creates a one-output transaction
-    txid = bitcoind.pay_to(str(address), amount / Decimal(COIN))
-    # We bump the fees by 5000
-    tx.vout.append(CTxOut(amount - Decimal("5000"), scriptPubKey))
-    tx.vin.append(CTxIn(COutPoint(lx(txid), 0)))
-    # Sign the new output with ALL
+    # Let's say we want to increase the fees by 5000 sats
+    amount = 5000
+
+    # Bitcoind is nice and will create the first stage transaction
+    first_txid = bitcoind.rpc.sendtoaddress(str(address), amount / COIN)
+    vout_index = get_output_index(
+        bitcoind.rpc.getrawtransaction(first_txid, 1), amount
+    )
+    # === We don't generate a block yet ! ===
+
+    tx.vin.append(CTxIn(COutPoint(lx(first_txid), vout_index),
+                        nSequence=0xfffffffe))
+    # Sign the new input with ALL
     tx_hash = SignatureHash(address.to_redeemScript(), tx, 1, SIGHASH_ALL,
-                            int(amount), SIGVERSION_WITNESS_V0)
+                            amount, SIGVERSION_WITNESS_V0)
     sig = privkey.sign(tx_hash) + bytes([SIGHASH_ALL])
     tx.wit.vtxinwit.append(CTxInWitness(CScriptWitness([sig, privkey.pub])))
+
+    return first_txid
 
 
 def tx_fees(bitcoind, tx):
@@ -457,16 +476,16 @@ def test_increase_revault_tx_feerate(bitcoind):
     sigs = [sign_emergency_vault_tx(CTx, p, stk_pubkeys, amount_vault)
             for p in stk_privkeys]
     # Sanity checks don't hurt
-    assert all(sig[-1] == SIGHASH_SINGLE | SIGHASH_ANYONECANPAY
+    assert all(sig[-1] == SIGHASH_ALL | SIGHASH_ANYONECANPAY
                for sig in sigs)
     CMTx = CMutableTransaction.from_tx(
         form_emergency_vault_tx(CTx, stk_pubkeys, sigs)
     )
     fees_before = tx_fees(bitcoind, CMTx)
-    add_input_output(bitcoind, CMTx)
+    first_txid = creates_add_input(bitcoind, CMTx)
     fees_after = tx_fees(bitcoind, CMTx)
     assert fees_after > fees_before
-    bitcoind.send_tx(CMTx.serialize().hex())
+    bitcoind.send_tx(CMTx.serialize().hex(), wait_for_mempool=[first_txid])
 
     # Test the emer unvault
     amount_vault = 50 * COIN - 500
@@ -479,16 +498,16 @@ def test_increase_revault_tx_feerate(bitcoind):
                                  amount_unvault)
             for p in stk_privkeys]
     # Sanity checks don't hurt
-    assert all(sig[-1] == SIGHASH_SINGLE | SIGHASH_ANYONECANPAY
+    assert all(sig[-1] == SIGHASH_ALL | SIGHASH_ANYONECANPAY
                for sig in sigs)
     CMTx = CMutableTransaction.from_tx(
         form_emer_unvault_tx(CTx, sigs, stk_pubkeys, serv_pubkey)
     )
     fees_before = tx_fees(bitcoind, CMTx)
-    add_input_output(bitcoind, CMTx)
+    first_txid = creates_add_input(bitcoind, CMTx)
     fees_after = tx_fees(bitcoind, CMTx)
     assert fees_after > fees_before
-    bitcoind.send_tx(CMTx.serialize().hex())
+    bitcoind.send_tx(CMTx.serialize().hex(), wait_for_mempool=[first_txid])
 
     # Test the cancel unvault
     amount_vault = 50 * COIN - 500
@@ -501,13 +520,13 @@ def test_increase_revault_tx_feerate(bitcoind):
                            amount_unvault)
             for p in stk_privkeys]
     # Sanity checks don't hurt
-    assert all(sig[-1] == SIGHASH_SINGLE | SIGHASH_ANYONECANPAY
+    assert all(sig[-1] == SIGHASH_ALL | SIGHASH_ANYONECANPAY
                for sig in sigs)
     CMTx = CMutableTransaction.from_tx(
         form_cancel_tx(CTx, sigs, stk_pubkeys, serv_pubkey)
     )
     fees_before = tx_fees(bitcoind, CMTx)
-    add_input_output(bitcoind, CMTx)
+    first_txid = creates_add_input(bitcoind, CMTx)
     fees_after = tx_fees(bitcoind, CMTx)
     assert fees_after > fees_before
-    bitcoind.send_tx(CMTx.serialize().hex())
+    bitcoind.send_tx(CMTx.serialize().hex(), wait_for_mempool=[first_txid])

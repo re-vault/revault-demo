@@ -371,9 +371,11 @@ class BitcoinD(TailableProc):
         self.generate_block(1, wait_for_mempool=str(txid))
         return txid
 
-    def send_tx(self, hex_tx):
-        txid = self.rpc.sendrawtransaction(hex_tx)
-        self.generate_block(1, wait_for_mempool=str(txid))
+    def send_tx(self, hex_tx, wait_for_mempool=None):
+        wait = [self.rpc.sendrawtransaction(hex_tx)]
+        if wait_for_mempool is not None:
+            wait += wait_for_mempool
+        self.generate_block(1, wait_for_mempool=wait)
 
     def has_utxo(self, address):
         """Test that we possess an utxo paying to this address."""
