@@ -15,6 +15,7 @@ from .transactions import (
     sign_unvault_tx, form_unvault_tx, create_cancel_tx, sign_cancel_tx,
     form_cancel_tx, create_emer_unvault_tx, sign_emer_unvault_tx,
     form_emer_unvault_tx, create_spend_tx, sign_spend_tx, form_spend_tx,
+    ALL_ANYONECANPAY
 )
 from .utils import tx_feerate, bump_feerate
 
@@ -744,9 +745,10 @@ class Vault:
             for i in range(1, 5):
                 if vault["emergency_sigs"][i - 1] is None:
                     self.vaults_lock.acquire()
-                    # FIXME: This MUST be ANYONECANPAY !!
-                    vault["emergency_sigs"][i - 1] = \
-                        self.sigserver.get_signature(txid, i)
+                    sig = self.sigserver.get_signature(txid, i)
+                    if sig is not None:
+                        assert sig[-1] == ALL_ANYONECANPAY
+                        vault["emergency_sigs"][i - 1] = sig
                     self.vaults_lock.release()
 
         # We got all the other signatures, if we append our (SIGHASH_ALL), the
@@ -770,9 +772,10 @@ class Vault:
             for i in range(1, 5):
                 if vault["unvault_emer_sigs"][i - 1] is None:
                     self.vaults_lock.acquire()
-                    # FIXME: This MUST be ANYONECANPAY !!
-                    vault["unvault_emer_sigs"][i - 1] = \
-                        self.sigserver.get_signature(txid, i)
+                    sig = self.sigserver.get_signature(txid, i)
+                    if sig is not None:
+                        assert sig[-1] == ALL_ANYONECANPAY
+                        vault["unvault_emer_sigs"][i - 1] = sig
                     self.vaults_lock.release()
 
     def update_cancel_unvault(self, vault):
@@ -785,9 +788,10 @@ class Vault:
             for i in range(1, 5):
                 if vault["cancel_sigs"][i - 1] is None:
                     self.vaults_lock.acquire()
-                    # FIXME: This MUST be ANYONECANPAY !!
-                    vault["cancel_sigs"][i - 1] = \
-                        self.sigserver.get_signature(txid, i)
+                    sig = self.sigserver.get_signature(txid, i)
+                    if sig is not None:
+                        assert sig[-1] == ALL_ANYONECANPAY
+                        vault["cancel_sigs"][i - 1] = sig
                     self.vaults_lock.release()
 
     def update_unvault_transaction(self, vault):
