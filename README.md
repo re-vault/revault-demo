@@ -13,39 +13,9 @@ This repo is a basic and insecure PoC.
 
 ### The architecture
 
-Revault is a vault architecture designed for securing the storage **and usage** of a significant amount of bitcoins held by multiple parties (such as managers of an investment fund).
-
-It aims at discouraging a theft as much as preventing it by going further than a
-simple N-of-N multisig where:
-- the stakeholders have full control over the multisig (a strong attack incentive as there is a high
-chance to get full control over the coins)
-- or they share this power with a trusted third party on which they rely for a non-trivial amount.
-
-This architecture does not protect against intentional fund locking (key erasure, for example, or
-refusal to sign) and thus targets users who can resolve this kind of problems outside
-the Bitcoin network (such as through the legal system).
-
-Finally, it keeps some flexibility as it allows a subset of the stakeholders to emit day-to-day transactions without requiring all N holders to verify and sign.
-
-The trick is to use N-of-N vaults for receiving funds and to pre-sign at reception a
-so-called "emergency transaction" which sends funds to a "deep vault", i.e. a timelocked N-of-N
-with N different keys [1].
-At fund reception, 3 other transactions are also signed:
-- The unvaulting transaction, which spends a vault output and spends to a relatively-timelocked
-    M-of-N output OR an N-of-N composed of the keys used for the initial vault.
-- The cancel transaction, which spends an unvaulting transaction and sends back the
-    coins to a "normal" vault.
-- The emergency transaction, which spends the unvaulting transaction to the emergency deep
-    vault.
-Of course, transactions are signed backward (à la payment channels).
-
-A stakeholder can revoke a spend to an (unknown / untrusted address) during the CSV delay.
-
-More details are available in the [architecture document](doc/archi.pdf) [EDIT: it's outdated for now!].
-
-[1] These N keys are preferably held by each stakeholder in some place which is both hard
-to access and geographically distant.
-
+The architecture is described [here](doc/revault.pdf), and the PoC is an instanciation of it (with 4
+participants (N=4), 2 subset members (M=2) with one of N\M which can act as a spare
+signer, and a CSV of 6 blocks).
 
 ### The demo
 
