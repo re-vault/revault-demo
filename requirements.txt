@@ -1,4 +1,0 @@
-bip32>=0.0.3
-python-bitcoinlib==0.11.0
-Flask==1.1.1
-requests==2.23.0
